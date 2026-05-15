@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradingOS — Ultimate Trading Journal & Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0e15;
+  --bg2:#111520;
+  --bg3:#171d2e;
+  --bg4:#1e263a;
+  --bg5:#252f46;
+  --border:rgba(255,255,255,0.06);
+  --border2:rgba(255,255,255,0.11);
+  --border3:rgba(255,255,255,0.18);
+  --t1:#eef0f8;
+  --t2:#8b95b0;
+  --t3:#4e5a75;
+  --green:#22d47a;
+  --green2:#16a85f;
+  --gbg:rgba(34,212,122,0.09);
+  --gborder:rgba(34,212,122,0.2);
+  --red:#f05252;
+  --red2:#c73d3d;
+  --rbg:rgba(240,82,82,0.09);
+  --rborder:rgba(240,82,82,0.2);
+  --blue:#4f8ef7;
+  --bbg:rgba(79,142,247,0.09);
+  --bborder:rgba(79,142,247,0.2);
+  --amber:#f5a623;
+  --abg:rgba(245,166,35,0.09);
+  --aborder:rgba(245,166,35,0.2);
+  --purple:#9b7cf4;
+  --pbg:rgba(155,124,244,0.09);
+  --pborder:rgba(155,124,244,0.2);
+  --teal:#2dd4bf;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
+  --radius:10px;
+  --radius-lg:14px;
+  --sidebar:220px;
+}
+
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--t1);font-family:var(--display);font-size:14px;line-height:1.6;min-height:100vh;display:flex}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg5);border-radius:2px}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  width:var(--sidebar);min-width:var(--sidebar);
+  background:var(--bg2);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:fixed;top:0;left:0;height:100vh;
+  overflow-y:auto;z-index:100;
+  padding:20px 0 32px;
+}
+.sb-logo{padding:0 16px 18px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.sb-logo-mark{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sb-logo-icon{width:30px;height:30px;background:var(--green);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#000;font-weight:800}
+.sb-logo-text{font-size:14px;font-weight:800;letter-spacing:.02em}
+.sb-logo-sub{font-size:10px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em}
+
+.sb-section{padding:0 10px;margin-bottom:4px}
+.sb-section-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:0 8px;margin-bottom:3px;margin-top:10px}
+
+.nav-btn{
+  display:flex;align-items:center;gap:9px;
+  width:100%;padding:7px 10px;
+  background:none;border:none;border-radius:8px;
+  font-size:12px;color:var(--t2);
+  cursor:pointer;text-align:left;
+  font-family:var(--display);font-weight:500;
+  transition:background .12s,color .12s;
+  position:relative;
+}
+.nav-btn i{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.nav-btn:hover{background:var(--bg3);color:var(--t1)}
+.nav-btn.active{background:var(--bbg);color:var(--blue)}
+.nav-btn .nb{
+  margin-left:auto;font-size:9px;
+  background:var(--green);color:#000;
+  padding:1px 6px;border-radius:10px;
+  font-family:var(--mono);font-weight:700;
+}
+
+/* ── MAIN ── */
+.main{margin-left:var(--sidebar);flex:1;overflow-y:auto;min-height:100vh}
+.page{display:none;padding:32px 36px;animation:fadein .2s ease}
+.page.active{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── PAGE HEADER ── */
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;gap:16px}
+.ph-left{}
+.ph-title{font-size:24px;font-weight:800;letter-spacing:-.02em;color:var(--t1)}
+.ph-sub{font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:3px;letter-spacing:.03em}
+.ph-actions{display:flex;gap:8px;flex-shrink:0;align-items:center}
+
+/* ── BUTTONS ── */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 14px;border-radius:8px;
+  font-size:11px;font-weight:600;letter-spacing:.02em;
+  border:1px solid var(--border2);background:var(--bg3);color:var(--t2);
+  cursor:pointer;font-family:var(--display);
+  transition:all .12s;white-space:nowrap;
+}
+.btn:hover{background:var(--bg4);color:var(--t1);border-color:var(--border3)}
+.btn-g{background:var(--gbg);color:var(--green);border-color:var(--gborder)}
+.btn-g:hover{background:rgba(34,212,122,0.15);color:var(--green)}
+.btn-b{background:var(--bbg);color:var(--blue);border-color:var(--bborder)}
+.btn-b:hover{background:rgba(79,142,247,0.15)}
+
+/* ── STAT GRID ── */
+.stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px}
+.stat-card{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:16px 16px 14px;
+  position:relative;overflow:hidden;
+}
+.stat-card::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0}
+.sc-g::after{background:var(--green)}
+.sc-b::after{background:var(--blue)}
+.sc-r::after{background:var(--red)}
+.sc-a::after{background:var(--amber)}
+.sc-p::after{background:var(--purple)}
+.stat-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:8px}
+.stat-value{font-size:21px;font-weight:800;font-family:var(--mono);letter-spacing:-.02em;line-height:1}
+.sv-g{color:var(--green)}.sv-b{color:var(--blue)}.sv-r{color:var(--red)}.sv-a{color:var(--amber)}.sv-p{color:var(--purple)}
+.stat-delta{font-size:10px;font-family:var(--mono);margin-top:6px;color:var(--t3)}
+.sd-up{color:var(--green)}.sd-dn{color:var(--red)}
+
+/* ── CARDS ── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px}
+.card-title{
+  display:flex;align-items:center;gap:7px;
+  font-size:9px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.1em;color:var(--t3);margin-bottom:16px;
+}
+.card-title i{font-size:12px}
+
+/* ── GRIDS ── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.g73{display:grid;grid-template-columns:7fr 3fr;gap:14px;margin-bottom:14px}
+.g41{display:grid;grid-template-columns:4fr 1fr;gap:14px;margin-bottom:14px}
+.mb14{margin-bottom:14px}
+
+/* ── TAGS ── */
+.tag{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:2px 8px;border-radius:6px;
+  font-size:10px;font-weight:600;font-family:var(--mono);
+  letter-spacing:.02em;
+}
+.tg{background:var(--gbg);color:var(--green);border:1px solid var(--gborder)}
+.tr{background:var(--rbg);color:var(--red);border:1px solid var(--rborder)}
+.tb{background:var(--bbg);color:var(--blue);border:1px solid var(--bborder)}
+.ta{background:var(--abg);color:var(--amber);border:1px solid var(--aborder)}
+.tp{background:var(--pbg);color:var(--purple);border:1px solid var(--pborder)}
+.tgr{background:var(--bg4);color:var(--t2);border:1px solid var(--border2)}
+
+/* ── CALLOUT ── */
+.callout{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:13px 16px;border-radius:var(--radius);
+  border:1px solid;margin-bottom:14px;
+}
+.co-b{background:var(--bbg);border-color:var(--bborder);color:var(--blue)}
+.co-g{background:var(--gbg);border-color:var(--gborder);color:var(--green)}
+.co-a{background:var(--abg);border-color:var(--aborder);color:var(--amber)}
+.co-r{background:var(--rbg);border-color:var(--rborder);color:var(--red)}
+.callout i{font-size:16px;flex-shrink:0;margin-top:1px}
+.co-title{font-size:11px;font-weight:700;margin-bottom:3px;letter-spacing:.01em}
+.co-body{font-size:12px;color:var(--t2);line-height:1.65}
+
+/* ── TOGGLE ── */
+.toggle{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:8px}
+.toggle-h{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;
+  background:var(--bg2);cursor:pointer;font-size:12px;font-weight:500;
+  transition:background .12s;user-select:none;
+}
+.toggle-h:hover{background:var(--bg3)}
+.toggle-h .chev{margin-left:auto;font-size:12px;color:var(--t3);transition:transform .18s}
+.toggle.open .toggle-h .chev{transform:rotate(90deg)}
+.toggle-body{
+  display:none;padding:14px 16px;
+  background:var(--bg);border-top:1px solid var(--border);
+  font-size:12px;color:var(--t2);line-height:1.75;
+}
+.toggle.open .toggle-body{display:block}
+
+/* ── DIVIDER ── */
+.div{height:1px;background:var(--border);margin:14px 0}
+
+/* ── QUOTE ── */
+.quote{
+  border-left:2px solid var(--blue);
+  padding:11px 15px;background:var(--bbg);border-radius:0 8px 8px 0;
+  font-size:12px;font-style:italic;color:var(--t2);margin:14px 0;
+  line-height:1.7;
+}
+.quote cite{display:block;margin-top:6px;font-style:normal;font-size:10px;color:var(--t3);font-family:var(--mono)}
+
+/* ── PROGRESS ── */
+.prog-row{margin-bottom:10px}
+.prog-labels{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px}
+.prog-labels span:first-child{color:var(--t2)}
+.prog-labels span:last-child{font-family:var(--mono);font-weight:600}
+.prog-bg{height:5px;background:var(--bg4);border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
+
+/* ── SETUP ROWS ── */
+.setup-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.setup-row:last-child{border-bottom:none;padding-bottom:0}
+.setup-rank{
+  width:22px;height:22px;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;font-family:var(--mono);flex-shrink:0;
+}
+.setup-name{font-size:12px;font-weight:500;flex:1;min-width:0}
+.sbar-bg{height:5px;background:var(--bg4);border-radius:3px;overflow:hidden;flex:2}
+.sbar-fill{height:100%;border-radius:3px}
+
+/* ── TRADE TABLE ── */
+.trade-table{width:100%;border-collapse:collapse}
+.trade-table th{
+  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--t3);text-align:left;padding:0 8px 10px 0;border-bottom:1px solid var(--border);
+}
+.trade-table td{
+  padding:10px 8px 10px 0;font-size:11px;border-bottom:1px solid var(--border);
+  color:var(--t2);vertical-align:middle;
+}
+.trade-table tr:last-child td{border-bottom:none}
+.trade-table td:first-child,.trade-table th:first-child{padding-left:0}
+.mono{font-family:var(--mono)}
+
+/* ── MOOD ── */
+.mood-row{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.mood-label{font-size:11px;color:var(--t2);min-width:90px}
+.mood-dots{display:flex;gap:3px}
+.md{
+  width:18px;height:18px;border-radius:50%;
+  background:var(--bg4);border:1px solid var(--border2);
+  cursor:pointer;transition:all .12s;flex-shrink:0;
+}
+.md.on{background:var(--blue);border-color:var(--blue)}
+.md.on-g{background:var(--green);border-color:var(--green)}
+.md.on-p{background:var(--purple);border-color:var(--purple)}
+.mood-val{font-family:var(--mono);font-size:11px;color:var(--t3);min-width:32px}
+
+/* ── IMG PLACEHOLDER ── */
+.img-ph{
+  background:var(--bg3);border:2px dashed var(--border2);border-radius:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;color:var(--t3);font-size:11px;cursor:pointer;
+  transition:all .15s;text-align:center;padding:20px;
+}
+.img-ph:hover{border-color:var(--blue);color:var(--blue);background:var(--bbg)}
+.img-ph i{font-size:24px}
+
+/* ── RULE ITEMS ── */
+.rule-item{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:8px 0;border-bottom:1px solid var(--border);
+  font-size:12px;color:var(--t2);line-height:1.55;
+}
+.rule-item:last-child{border-bottom:none}
+.rnum{color:var(--t3);font-family:var(--mono);font-size:10px;min-width:18px;padding-top:1px}
+
+/* ── EMOTION CARDS ── */
+.em-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:13px 10px;text-align:center;
+}
+.em-emoji{font-size:24px;margin-bottom:5px}
+.em-name{font-size:11px;font-weight:600;margin-bottom:3px}
+.em-freq{font-size:10px;color:var(--t3);font-family:var(--mono)}
+
+/* ── GOAL CARD ── */
+.goal-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:18px;margin-bottom:12px;
+}
+.goal-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.goal-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.goal-title{font-size:13px;font-weight:700}
+.goal-due{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:2px}
+.goal-prog-txt{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px}
+.goal-note{font-size:11px;color:var(--t3);margin-top:7px;font-family:var(--mono)}
+
+/* ── METRIC TABLE ── */
+.mtable{width:100%;border-collapse:collapse}
+.mtable td{padding:8px 0;font-size:12px;border-bottom:1px solid var(--border);color:var(--t2)}
+.mtable td:last-child{text-align:right}
+.mtable tr:last-child td{border-bottom:none}
+
+/* ── WEEKLY HEATMAP ── */
+.hmap-grid{display:grid;grid-template-columns:60px repeat(5,1fr);gap:5px;margin-top:8px}
+.hmap-head{text-align:center;font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:4px}
+.hmap-row-label{font-size:10px;color:var(--t3);font-family:var(--mono);display:flex;align-items:center}
+.hmap-cell{
+  text-align:center;padding:7px 4px;border-radius:6px;
+  font-family:var(--mono);font-size:10px;font-weight:600;
+}
+
+/* ── REVIEW SECTIONS ── */
+.rev-q{font-size:12px;font-weight:700;margin-bottom:7px;color:var(--t1)}
+.rev-a{
+  font-size:12px;color:var(--t2);line-height:1.7;
+  background:var(--bg3);border-radius:8px;padding:11px 13px;
+  border:1px solid var(--border);min-height:52px;margin-bottom:14px;
+}
+
+/* ── LANDING ── */
+.hero{
+  text-align:center;padding:52px 32px 44px;
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:18px;margin-bottom:20px;
+  position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;top:-80px;left:50%;transform:translateX(-50%);
+  width:400px;height:400px;border-radius:50%;
+  background:radial-gradient(circle,rgba(34,212,122,0.06) 0%,transparent 70%);
+  pointer-events:none;
+}
+.hero h1{font-size:34px;font-weight:800;line-height:1.15;letter-spacing:-.03em;margin-bottom:14px}
+.hero h1 span{color:var(--green)}
+.hero p{font-size:14px;color:var(--t2);max-width:480px;margin:0 auto 24px;line-height:1.7}
+.price-badge{
+  display:inline-flex;align-items:center;gap:10px;
+  background:var(--gbg);border:1px solid var(--gborder);
+  border-radius:40px;padding:10px 26px;
+  font-size:22px;font-weight:800;color:var(--green);font-family:var(--mono);
+}
+.price-badge s{color:var(--t3);font-size:14px}
+.cta-note{font-size:11px;color:var(--t3);margin-top:10px}
+
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+.feat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px}
+.feat-card i{font-size:20px;color:var(--blue);margin-bottom:10px;display:block}
+.feat-card h3{font-size:12px;font-weight:700;margin-bottom:6px}
+.feat-card p{font-size:11px;color:var(--t2);line-height:1.65}
+
+/* ── FORMULA BOX ── */
+.formula-box{
+  background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+  padding:13px;font-family:var(--mono);font-size:11px;
+  color:var(--teal);line-height:1.9;
+}
+.formula-box .fc{color:var(--t2)}
+
+/* ── TOC ── */
+.toc-item{
+  display:flex;align-items:center;gap:12px;
+  padding:13px 16px;background:var(--bg2);
+  border:1px solid var(--border);border-radius:var(--radius);
+  margin-bottom:7px;cursor:pointer;transition:all .12s;
+}
+.toc-item:hover{border-color:var(--border2);background:var(--bg3)}
+.toc-num{font-family:var(--mono);font-size:10px;color:var(--t3);min-width:22px}
+.toc-name{font-size:13px;font-weight:600;flex:1}
+.toc-desc{font-size:11px;color:var(--t3)}
+
+/* ── CHART WRAPPER ── */
+.cw{position:relative;width:100%}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){
+  :root{--sidebar:0px}
+  .sidebar{display:none}
+  .main{margin-left:0}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .g2,.g3,.g73,.feat-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════ SIDEBAR ════════════════════════════ -->
+<nav class="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-mark">
+      <div class="sb-logo-icon">📈</div>
+      <span class="sb-logo-text">TradingOS</span>
+    </div>
+    <div class="sb-logo-sub">v2.0 · Trading Journal</div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-label">Overview</div>
+    <button class="nav-btn active" onclick="nav('dashboard',this)"><i class="fa-solid fa-chart-line"></i> Dashboard</button>
+    <button class="nav-btn" onclick="nav('toc',this)"><i class="fa-solid fa-list"></i> Table of Contents</button>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-label">Core</div>
+    <button class="nav-btn" onclick="nav('plan',this)"><i class="fa-solid fa-clipboard-list"></i> Trading Plan</button>
+    <button class="nav-btn" onclick="nav('daily',this)"><i class="fa-solid fa-sun"></i> Daily Log <span class="nb">New</span></button>
+    <button class="nav-btn" onclick="nav('database',this)"><i class="fa-solid fa-database"></i> Trade Database</button>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-label">Growth</div>
+    <button class="nav-btn" onclick="nav('psychology',this)"><i class="fa-solid fa-brain"></i> Psychology</button>
+    <button class="nav-btn" onclick="nav('goals',this)"><i class="fa-solid fa-bullseye"></i> Goals</button>
+    <button class="nav-btn" onclick="nav('analytics',this)"><i class="fa-solid fa-chart-bar"></i> Analytics</button>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-label">Product</div>
+    <button class="nav-btn" onclick="nav('landing',this)"><i class="fa-solid fa-star"></i> Landing Page</button>
+    <button class="nav-btn" onclick="nav('setup',this)"><i class="fa-solid fa-book"></i> Setup Guide</button>
+  </div>
+</nav>
+
+<!-- ════════════════════════════ MAIN ════════════════════════════ -->
+<main class="main">
+
+<!-- ── DASHBOARD ── -->
+<div class="page active" id="page-dashboard">
+  <div class="ph">
+    <div class="ph-left">
+      <div class="ph-title">📊 Performance Dashboard</div>
+      <div class="ph-sub">Week of Jun 3 – Jun 7, 2025 · 147 total trades logged · 47-day streak 🔥</div>
+    </div>
+    <div class="ph-actions">
+      <button class="btn btn-g"><i class="fa-solid fa-plus"></i> New Trade</button>
+      <button class="btn"><i class="fa-solid fa-rotate"></i> Refresh</button>
+    </div>
+  </div>
+
+  <div class="callout co-b">
+    <i class="fa-solid fa-circle-info"></i>
+    <div>
+      <div class="co-title">Welcome back, Trader 👋</div>
+      <div class="co-body">You've been journaling for <strong style="color:var(--blue)">47 consecutive days</strong>. Win rate improved +8.3% this month vs last. Keep executing your edge — the results will follow.</div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card sc-g">
+      <div class="stat-label">Net P&L (MTD)</div>
+      <div class="stat-value sv-g">+$8,420</div>
+      <div class="stat-delta sd-up">↑ +$1,240 vs last month</div>
+    </div>
+    <div class="stat-card sc-b">
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-value sv-b">64.2%</div>
+      <div class="stat-delta sd-up">↑ +8.3% vs last month</div>
+    </div>
+    <div class="stat-card sc-a">
+      <div class="stat-label">Total Trades</div>
+      <div class="stat-value sv-a">147</div>
+      <div class="stat-delta">32 trades this month</div>
+    </div>
+    <div class="stat-card sc-p">
+      <div class="stat-label">Avg R-Multiple</div>
+      <div class="stat-value sv-p">+1.84R</div>
+      <div class="stat-delta sd-up">↑ +0.32R improvement</div>
+    </div>
+    <div class="stat-card sc-g">
+      <div class="stat-label">Win Streak</div>
+      <div class="stat-value sv-g">🔥 7W</div>
+      <div class="stat-delta">7 winning days straight</div>
+    </div>
+  </div>
+
+  <div class="g73">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-chart-line"></i> Equity Curve — Year to Date</div>
+      <div class="cw" style="height:210px"><canvas id="c-equity" role="img" aria-label="Equity curve showing account growth from $25,000 to $38,420 over 6 months">Account grew from $25,000 in Jan to $38,420 in Jun.</canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-trophy"></i> Top Setups by Win Rate</div>
+      <div class="setup-row">
+        <div class="setup-rank" style="background:var(--abg);color:var(--amber)">1</div>
+        <div class="setup-name">Bull Flag BO</div>
+        <div class="sbar-bg"><div class="sbar-fill" style="width:88%;background:var(--green)"></div></div>
+        <span class="tag tg">88%</span>
+      </div>
+      <div class="setup-row">
+        <div class="setup-rank" style="background:var(--bg4);color:var(--t3)">2</div>
+        <div class="setup-name">VWAP Reclaim</div>
+        <div class="sbar-bg"><div class="sbar-fill" style="width:72%;background:var(--blue)"></div></div>
+        <span class="tag tb">72%</span>
+      </div>
+      <div class="setup-row">
+        <div class="setup-rank" style="background:var(--bg4);color:var(--t3)">3</div>
+        <div class="setup-name">Opening Drive</div>
+        <div class="sbar-bg"><div class="sbar-fill" style="width:68%;background:var(--blue)"></div></div>
+        <span class="tag tb">68%</span>
+      </div>
+      <div class="div"></div>
+      <div class="card-title" style="color:var(--red);margin-bottom:6px"><i class="fa-solid fa-thumbs-down"></i> Worst Setup</div>
+      <div class="setup-row" style="border:none;padding:0">
+        <div class="setup-rank" style="background:var(--rbg);color:var(--red)">!</div>
+        <div class="setup-name">Reversal at HOD</div>
+        <div class="sbar-bg"><div class="sbar-fill" style="width:31%;background:var(--red)"></div></div>
+        <span class="tag tr">31%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="g3">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-arrow-trend-up"></i> Win Rate Trend (6mo)</div>
+      <div class="cw" style="height:130px"><canvas id="c-wr" role="img" aria-label="Win rate trend from 54% to 64% over 6 months">Win rate improved from 54% in Jan to 64.2% in Jun.</canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-coins"></i> Avg R-Multiple Trend</div>
+      <div class="cw" style="height:130px"><canvas id="c-rm" role="img" aria-label="R-Multiple trend from 1.1R to 1.84R">R-multiple grew from 1.1R to 1.84R showing improving trade management.</canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-chart-bar"></i> Monthly P&L</div>
+      <div class="cw" style="height:130px"><canvas id="c-mpl" role="img" aria-label="Monthly P&L bar chart showing mostly profitable months">Monthly P&L with one losing month in February and record month in June.</canvas></div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-calendar"></i> Monthly Performance Overview</div>
+      <div class="prog-row"><div class="prog-labels"><span>January</span><span style="color:var(--green)">+$1,840 · 58% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:58%;background:var(--green2)"></div></div></div>
+      <div class="prog-row"><div class="prog-labels"><span>February</span><span style="color:var(--red)">-$1,100 · 41% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:41%;background:var(--red)"></div></div></div>
+      <div class="prog-row"><div class="prog-labels"><span>March</span><span style="color:var(--green)">+$3,200 · 61% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:61%;background:var(--green2)"></div></div></div>
+      <div class="prog-row"><div class="prog-labels"><span>April</span><span style="color:var(--green)">+$2,640 · 60% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:60%;background:var(--green2)"></div></div></div>
+      <div class="prog-row"><div class="prog-labels"><span>May</span><span style="color:var(--green)">+$4,220 · 63% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:63%;background:var(--green2)"></div></div></div>
+      <div class="prog-row"><div class="prog-labels"><span>June (MTD)</span><span style="color:var(--green)">+$8,420 · 64% WR</span></div><div class="prog-bg"><div class="prog-fill" style="width:64%;background:var(--green)"></div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-shield-halved"></i> Risk & Key Metrics</div>
+      <table class="mtable">
+        <tr><td>Max Drawdown</td><td class="mono" style="color:var(--red)">-$3,840 (14.2%)</td></tr>
+        <tr><td>Profit Factor</td><td class="mono" style="color:var(--green)">2.34</td></tr>
+        <tr><td>Expectancy / Trade</td><td class="mono" style="color:var(--green)">+$57.28</td></tr>
+        <tr><td>Avg Win / Avg Loss</td><td class="mono">$340 / $147</td></tr>
+        <tr><td>Sharpe Ratio (est.)</td><td class="mono" style="color:var(--green)">1.82</td></tr>
+        <tr><td>Best Day</td><td class="mono" style="color:var(--green)">+$2,140</td></tr>
+        <tr><td>Worst Day</td><td class="mono" style="color:var(--red)">-$880</td></tr>
+        <tr><td>Daily Loss Limit</td><td class="mono" style="color:var(--amber)">-$500</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="quote">"The goal of a trader should not be to make profits — it's to execute your trading plan flawlessly. Profits are the byproduct of disciplined execution."<cite>— Mark Douglas, Trading in the Zone</cite></div>
+</div>
+
+<!-- ── TABLE OF CONTENTS ── -->
+<div class="page" id="page-toc">
+  <div class="ph"><div class="ph-left"><div class="ph-title">📋 Table of Contents</div><div class="ph-sub">8 sections · 40+ pages · Complete trading system</div></div></div>
+  <div class="callout co-g"><i class="fa-solid fa-circle-check"></i><div><div class="co-title">How to use this template</div><div class="co-body">Duplicate this workspace to your account. Start with Section 2 (Trading Plan) and fill in your rules before logging your first trade. The Dashboard stats auto-populate as you log trades.</div></div></div>
+  <div class="toc-item" onclick="nav('dashboard',null)"><span class="toc-num">01</span><div class="toc-name">📊 Dashboard & Home</div><div class="toc-desc">Equity curve, stats, quick links</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('plan',null)"><span class="toc-num">02</span><div class="toc-name">📋 Trading Plan & Rules</div><div class="toc-desc">Your edge, rules, allowed setups</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('daily',null)"><span class="toc-num">03</span><div class="toc-name">🌅 Daily Trading Log</div><div class="toc-desc">Pre-market, trades, reflection</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('database',null)"><span class="toc-num">04</span><div class="toc-name">🗃️ Master Trade Database</div><div class="toc-desc">All trades, filters, formulas</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('psychology',null)"><span class="toc-num">05</span><div class="toc-name">🧠 Psychology Journal</div><div class="toc-desc">Emotion tracker, trigger log</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('goals',null)"><span class="toc-num">06</span><div class="toc-name">🎯 Goals & Progress</div><div class="toc-desc">SMART goals, milestones, skills</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item" onclick="nav('analytics',null)"><span class="toc-num">07</span><div class="toc-name">📈 Analytics & Reviews</div><div class="toc-desc">Weekly/monthly deep dives</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+  <div class="toc-item"><span class="toc-num">08</span><div class="toc-name">📚 Resources & Appendix</div><div class="toc-desc">Setup library, calculator, reading</div><i class="fa-solid fa-arrow-right" style="color:var(--t3);font-size:12px"></i></div>
+</div>
+
+<!-- ── TRADING PLAN ── -->
+<div class="page" id="page-plan">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">📋 Trading Plan & Rules</div><div class="ph-sub">Last updated: Jun 1, 2025 · Version 3.2 · Read every morning</div></div>
+    <div class="ph-actions"><button class="btn"><i class="fa-solid fa-pen"></i> Edit Plan</button></div>
+  </div>
+  <div class="callout co-a"><i class="fa-solid fa-triangle-exclamation"></i><div><div class="co-title">⚠️ Read This Every Morning Before Trading</div><div class="co-body">Your trading plan is your constitution. Every deviation is a vote against your future self. If a trade isn't in the plan — don't take it. Consistency beats perfection every time.</div></div></div>
+  <div class="g2" style="margin-top:14px">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-shield"></i> Core Trading Rules</div>
+      <div class="rule-item"><span class="rnum">01</span>Never risk more than 1% of account per trade</div>
+      <div class="rule-item"><span class="rnum">02</span>Max 3 open positions at any time</div>
+      <div class="rule-item"><span class="rnum">03</span>Stop trading after 2 consecutive losses — 30 min break minimum</div>
+      <div class="rule-item"><span class="rnum">04</span>Daily max loss: -$500. Hit it → trading day is over. No exceptions.</div>
+      <div class="rule-item"><span class="rnum">05</span>Only trade high-quality setups — patience is a position</div>
+      <div class="rule-item"><span class="rnum">06</span>Never move stop loss to increase risk — only to lock profits</div>
+      <div class="rule-item"><span class="rnum">07</span>Minimum R:R must be 2:1 before entry</div>
+      <div class="rule-item"><span class="rnum">08</span>No trading first 15 minutes of open — observe only</div>
+      <div class="rule-item"><span class="rnum">09</span>No news trades unless pre-planned and sized down 50%</div>
+      <div class="rule-item"><span class="rnum">10</span>Log EVERY trade. No exceptions. Ever.</div>
+    </div>
+    <div>
+      <div class="card mb14">
+        <div class="card-title"><i class="fa-solid fa-sliders"></i> Risk Parameters</div>
+        <table class="mtable">
+          <tr><td>Account Size</td><td class="mono">$25,000</td></tr>
+          <tr><td>Max Risk / Trade</td><td class="mono" style="color:var(--amber)">1% = $250</td></tr>
+          <tr><td>Daily Loss Limit</td><td class="mono" style="color:var(--red)">-$500</td></tr>
+          <tr><td>Weekly Loss Limit</td><td class="mono" style="color:var(--red)">-$1,500</td></tr>
+          <tr><td>Min R:R</td><td class="mono" style="color:var(--green)">2:1</td></tr>
+          <tr><td>Position Sizing</td><td class="mono">Fixed Risk $</td></tr>
+          <tr><td>Instruments</td><td class="mono">US Equities, ETFs</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-check-double"></i> Allowed Setups</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">
+          <span class="tag tg">Bull Flag Breakout</span><span class="tag tg">VWAP Reclaim</span><span class="tag tg">Opening Drive</span><span class="tag tb">Momentum Pullback</span><span class="tag tb">Gap & Go</span><span class="tag tb">EMA Bounce</span><span class="tag ta">Range Breakout</span><span class="tag ta">Trend Continuation</span>
+        </div>
+        <div class="div"></div>
+        <div class="card-title" style="color:var(--red);margin-bottom:6px"><i class="fa-solid fa-ban"></i> Forbidden</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          <span class="tag tr">Reversal catches</span><span class="tag tr">FOMO chases</span><span class="tag tr">Untested levels</span><span class="tag tr">Pre-market low float</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="toggle open"><div class="toggle-h" onclick="tog(this)"><i class="fa-solid fa-clock" style="color:var(--t3);font-size:12px"></i>&nbsp; Trading Hours & Sessions <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--green)">Prime Session:</strong> 9:45 AM – 11:30 AM EST — highest quality setups, most follow-through<br><strong style="color:var(--blue)">Afternoon Session:</strong> 2:00 PM – 3:30 PM EST — trend continuation only, half size<br><strong style="color:var(--red)">Avoid:</strong> 12:00 PM – 1:30 PM EST (lunch chop), last 30 min (erratic fills)</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><i class="fa-solid fa-chart-candlestick" style="color:var(--t3);font-size:12px"></i>&nbsp; Timeframe Hierarchy <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Top-down approach every morning:</strong><br>Daily chart → bias & key support/resistance levels<br>1H chart → structure, trend direction, major S/R<br>5-min chart → entry timing, pattern confirmation<br>1-min chart → precision entry only (never for analysis)</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><i class="fa-solid fa-brain" style="color:var(--t3);font-size:12px"></i>&nbsp; Mental Framework & Mindset Rules <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body">Every trade is a probability, not a certainty. You are playing the long game across hundreds of executions.<br><br>Before every trade ask: <em style="color:var(--t1)">"Would I be comfortable if 100 traders took this exact same trade right now?"</em><br><br>Losses are tuition. Log them, learn from them, move forward with discipline.</div></div>
+  <div class="quote">"The market is designed to transfer money from the impatient to the patient."<cite>— Warren Buffett</cite></div>
+</div>
+
+<!-- ── DAILY LOG ── -->
+<div class="page" id="page-daily">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">🌅 Daily Trading Log</div><div class="ph-sub">Wednesday, June 5, 2025 · Example filled day · Duplicate for each trading day</div></div>
+    <div class="ph-actions"><button class="btn btn-b"><i class="fa-solid fa-copy"></i> Duplicate Template</button></div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-face-smile"></i> Pre-Market Mindset Check</div>
+      <div class="mood-row">
+        <div class="mood-label">Mood / Energy</div>
+        <div class="mood-dots" id="m1">
+          <div class="md on" onclick="setm('m1',1)"></div><div class="md on" onclick="setm('m1',2)"></div><div class="md on" onclick="setm('m1',3)"></div><div class="md on" onclick="setm('m1',4)"></div><div class="md on" onclick="setm('m1',5)"></div><div class="md" onclick="setm('m1',6)"></div><div class="md" onclick="setm('m1',7)"></div><div class="md" onclick="setm('m1',8)"></div><div class="md" onclick="setm('m1',9)"></div><div class="md" onclick="setm('m1',10)"></div>
+        </div>
+        <div class="mood-val" id="m1v">5/10</div>
+      </div>
+      <div class="mood-row">
+        <div class="mood-label">Sleep Quality</div>
+        <div class="mood-dots" id="m2">
+          <div class="md on-g on" onclick="setm('m2',1)"></div><div class="md on-g on" onclick="setm('m2',2)"></div><div class="md on-g on" onclick="setm('m2',3)"></div><div class="md on-g on" onclick="setm('m2',4)"></div><div class="md on-g on" onclick="setm('m2',5)"></div><div class="md on-g on" onclick="setm('m2',6)"></div><div class="md on-g on" onclick="setm('m2',7)"></div><div class="md" onclick="setm('m2',8)"></div><div class="md" onclick="setm('m2',9)"></div><div class="md" onclick="setm('m2',10)"></div>
+        </div>
+        <div class="mood-val" id="m2v">7/10</div>
+      </div>
+      <div class="mood-row">
+        <div class="mood-label">Focus Level</div>
+        <div class="mood-dots" id="m3">
+          <div class="md on-p on" onclick="setm('m3',1)"></div><div class="md on-p on" onclick="setm('m3',2)"></div><div class="md on-p on" onclick="setm('m3',3)"></div><div class="md on-p on" onclick="setm('m3',4)"></div><div class="md on-p on" onclick="setm('m3',5)"></div><div class="md on-p on" onclick="setm('m3',6)"></div><div class="md on-p on" onclick="setm('m3',7)"></div><div class="md on-p on" onclick="setm('m3',8)"></div><div class="md" onclick="setm('m3',9)"></div><div class="md" onclick="setm('m3',10)"></div>
+        </div>
+        <div class="mood-val" id="m3v">8/10</div>
+      </div>
+      <div class="div"></div>
+      <div style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px">Market Conditions</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap"><span class="tag tg">Trending Up</span><span class="tag tb">High Volume</span><span class="tag tgr">Earnings Season</span><span class="tag ta">VIX: 18.4</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-note-sticky"></i> Pre-Market Notes & Game Plan</div>
+      <div class="rev-a" style="min-height:120px"><strong style="color:var(--t1)">Overnight news:</strong> NVDA earnings beat after close. Tech gapping up 1.2% pre-market.<br><br><strong style="color:var(--t1)">Key levels:</strong> SPY $440 (resistance), QQQ $376 (support), NVDA $480 (gap fill)<br><br><strong style="color:var(--t1)">Today's focus:</strong> Wait for opening drive confirmation. Look for bull flags on high-volume leaders. NO chasing opens.</div>
+      <div class="quote" style="margin-top:10px;margin-bottom:0">"I will only take trades that fit my plan today. Quality over quantity."<cite>— Morning Intention Statement</cite></div>
+    </div>
+  </div>
+
+  <!-- Trade Block -->
+  <div class="card mb14">
+    <div class="card-title" style="margin-bottom:14px"><i class="fa-solid fa-chart-candlestick"></i> Trade #1 &nbsp;<span class="tag tg">WIN</span></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Symbol</div><div style="font-size:18px;font-weight:800;font-family:var(--mono)">NVDA</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Direction</div><span class="tag tg" style="font-size:11px">📈 LONG</span></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Setup</div><span class="tag tb" style="font-size:11px">Bull Flag BO</span></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Timeframe</div><div class="mono" style="font-size:12px">5min / 1H</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Entry</div><div class="mono" style="font-size:14px;font-weight:600">$468.40</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Stop Loss</div><div class="mono" style="font-size:14px;font-weight:600;color:var(--red)">$463.20</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Exit / Target</div><div class="mono" style="font-size:14px;font-weight:600;color:var(--green)">$479.00</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">R:R Ratio</div><div class="mono" style="font-size:14px;font-weight:600;color:var(--purple)">2.1:1</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">P&L</div><div class="mono" style="font-size:16px;font-weight:800;color:var(--green)">+$520</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">R-Multiple</div><div class="mono" style="font-size:16px;font-weight:800;color:var(--green)">+2.0R</div></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Outcome</div><span class="tag tg" style="font-size:11px">WIN ✓</span></div>
+      <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Followed Plan?</div><span class="tag tg" style="font-size:11px">✓ YES</span></div>
+    </div>
+    <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Entry Thesis</div>
+    <div class="rev-a" style="margin-bottom:12px;min-height:36px">NVDA formed clean bull flag on 5-min after opening drive. Volume confirmed on breakout above $467 flag resistance. Strong relative strength vs SPY. Catalyst: earnings beat.</div>
+    <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Emotions During Trade</div>
+    <div style="display:flex;gap:5px;margin-bottom:13px"><span class="tag tb">Calm & Focused</span><span class="tag tg">Confident in setup</span><span class="tag tgr">No urge to exit early</span></div>
+    <div class="img-ph" style="height:150px"><i class="fa-solid fa-image"></i><span>Click to upload annotated chart screenshot</span><span style="font-size:10px">Recommended: TradingView screenshot with marked entry / exit / stop</span></div>
+  </div>
+
+  <!-- Daily Summary -->
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-moon"></i> Daily Summary & Post-Market Reflection</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
+      <div class="stat-card sc-g" style="padding:13px"><div class="stat-label">Day P&L</div><div class="stat-value sv-g" style="font-size:18px">+$840</div></div>
+      <div class="stat-card sc-b" style="padding:13px"><div class="stat-label">Trades Taken</div><div class="stat-value sv-b" style="font-size:18px">3</div></div>
+      <div class="stat-card sc-g" style="padding:13px"><div class="stat-label">Day Win Rate</div><div class="stat-value sv-g" style="font-size:18px">67%</div></div>
+      <div class="stat-card sc-p" style="padding:13px"><div class="stat-label">Plan Adherence</div><div class="stat-value sv-p" style="font-size:18px">9/10</div></div>
+    </div>
+    <div class="rev-q">What did I do well today?</div>
+    <div class="rev-a">Waited patiently for the NVDA setup instead of chasing the open. Respected my stop on the AAPL trade. Took profits at planned target — didn't get greedy.</div>
+    <div class="rev-q">What would I improve?</div>
+    <div class="rev-a">Entered AMD a bit early — should have waited for full candle close above resistance. Also checked P&L mid-trade. Keep chart full screen, hide P&L on open positions.</div>
+    <div class="rev-q">Key lesson for tomorrow</div>
+    <div class="rev-a" style="margin-bottom:0">Patience pays. The best setup (NVDA) came 45 minutes after open. Trust the plan, trust the stop, let the trade breathe.</div>
+  </div>
+</div>
+
+<!-- ── DATABASE ── -->
+<div class="page" id="page-database">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">🗃️ Master Trade Database</div><div class="ph-sub">147 trades · All time · Showing: All Trades</div></div>
+    <div class="ph-actions">
+      <button class="btn"><i class="fa-solid fa-filter"></i> Filter</button>
+      <button class="btn btn-g"><i class="fa-solid fa-plus"></i> Add Trade</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+    <button class="btn btn-b" style="font-size:10px;padding:5px 11px">All Trades</button>
+    <button class="btn" style="font-size:10px;padding:5px 11px">Wins Only</button>
+    <button class="btn" style="font-size:10px;padding:5px 11px">By Setup</button>
+    <button class="btn" style="font-size:10px;padding:5px 11px">By Month</button>
+    <button class="btn" style="font-size:10px;padding:5px 11px">By Instrument</button>
+    <button class="btn" style="font-size:10px;padding:5px 11px">Losses Only</button>
+  </div>
+
+  <div class="card" style="padding:16px 16px 4px;overflow-x:auto">
+    <table class="trade-table" style="min-width:620px">
+      <thead><tr>
+        <th>Date</th><th>Symbol</th><th>Direction</th><th>Setup</th><th>Entry / Exit</th><th>P&L $</th><th>R-Multiple</th><th>W/L</th><th>Emotion</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="mono" style="color:var(--t3)">Jun 05</td><td><strong>NVDA</strong></td><td><span class="tag tg" style="font-size:9px">LONG</span></td><td style="font-size:11px;color:var(--t2)">Bull Flag</td><td class="mono">$468.40 / $479.00</td><td class="mono" style="color:var(--green);font-weight:700">+$520</td><td class="mono" style="color:var(--green)">+2.0R</td><td><span class="tag tg" style="font-size:9px">W</span></td><td style="font-size:11px">Calm 😌</td></tr>
+        <tr><td class="mono" style="color:var(--t3)">Jun 05</td><td><strong>AAPL</strong></td><td><span class="tag tg" style="font-size:9px">LONG</span></td><td style="font-size:11px;color:var(--t2)">VWAP</td><td class="mono">$189.20 / $186.80</td><td class="mono" style="color:var(--red);font-weight:700">-$240</td><td class="mono" style="color:var(--red)">-1.0R</td><td><span class="tag tr" style="font-size:9px">L</span></td><td style="font-size:11px">Anxious 😰</td></tr>
+        <tr><td class="mono" style="color:var(--t3)">Jun 05</td><td><strong>META</strong></td><td><span class="tag tg" style="font-size:9px">LONG</span></td><td style="font-size:11px;color:var(--t2)">Gap & Go</td><td class="mono">$487.60 / $494.40</td><td class="mono" style="color:var(--green);font-weight:700">+$340</td><td class="mono" style="color:var(--green)">+1.4R</td><td><span class="tag tg" style="font-size:9px">W</span></td><td style="font-size:11px">Focused 🎯</td></tr>
+        <tr><td class="mono" style="color:var(--t3)">Jun 04</td><td><strong>SPY</strong></td><td><span class="tag tr" style="font-size:9px">SHORT</span></td><td style="font-size:11px;color:var(--t2)">Rejection</td><td class="mono">$439.80 / $437.20</td><td class="mono" style="color:var(--green);font-weight:700">+$390</td><td class="mono" style="color:var(--green)">+1.6R</td><td><span class="tag tg" style="font-size:9px">W</span></td><td style="font-size:11px">Calm 😌</td></tr>
+        <tr><td class="mono" style="color:var(--t3)">Jun 04</td><td><strong>AMD</strong></td><td><span class="tag tg" style="font-size:9px">LONG</span></td><td style="font-size:11px;color:var(--t2)">Bull Flag</td><td class="mono">$178.30 / $174.90</td><td class="mono" style="color:var(--red);font-weight:700">-$252</td><td class="mono" style="color:var(--red)">-1.0R</td><td><span class="tag tr" style="font-size:9px">L</span></td><td style="font-size:11px">Uncertain 🤔</td></tr>
+        <tr><td class="mono" style="color:var(--t3)">Jun 03</td><td><strong>TSLA</strong></td><td><span class="tag tg" style="font-size:9px">LONG</span></td><td style="font-size:11px;color:var(--t2)">Open Drive</td><td class="mono">$248.10 / $256.80</td><td class="mono" style="color:var(--green);font-weight:700">+$870</td><td class="mono" style="color:var(--green)">+3.1R</td><td><span class="tag tg" style="font-size:9px">W</span></td><td style="font-size:11px">Calm 😌</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="g2" style="margin-top:14px">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-list-check"></i> All Properties (Notion)</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--t2)">
+        <div><span class="tag tb" style="font-size:9px;margin-right:6px">Text</span>Trade ID, Symbol, Setup, Entry Thesis, Notes</div>
+        <div><span class="tag ta" style="font-size:9px;margin-right:6px">Date</span>Trade Date, Entry Time, Exit Time</div>
+        <div><span class="tag tp" style="font-size:9px;margin-right:6px">Select</span>Direction, Win/Loss, Emotional State, Market Condition</div>
+        <div><span class="tag tg" style="font-size:9px;margin-right:6px">Number</span>Entry $, Exit $, Stop $, Target $, P&L $, Shares, Risk $</div>
+        <div><span class="tag tgr" style="font-size:9px;margin-right:6px">Formula</span>R-Multiple, P&L %, R:R Ratio, Plan Adherence Score</div>
+        <div><span class="tag tr" style="font-size:9px;margin-right:6px">Files</span>Chart Screenshot (annotated)</div>
+        <div><span class="tag tgr" style="font-size:9px;margin-right:6px">Checkbox</span>Followed Plan?, News Trade?, Scaled In?</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-calculator"></i> Notion Formulas</div>
+      <div class="formula-box">
+        <span style="color:var(--purple)">R-Multiple:</span><br>
+        <span class="fc">(prop("Exit") - prop("Entry")) /</span><br>
+        <span class="fc">(prop("Entry") - prop("Stop"))</span><br><br>
+        <span style="color:var(--purple)">P&L %:</span><br>
+        <span class="fc">(prop("Exit") - prop("Entry")) /</span><br>
+        <span class="fc">prop("Entry") * 100</span><br><br>
+        <span style="color:var(--purple)">R:R Ratio:</span><br>
+        <span class="fc">(prop("Target") - prop("Entry")) /</span><br>
+        <span class="fc">(prop("Entry") - prop("Stop"))</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PSYCHOLOGY ── -->
+<div class="page" id="page-psychology">
+  <div class="ph"><div class="ph-left"><div class="ph-title">🧠 Psychology & Emotions Journal</div><div class="ph-sub">Self-awareness is your greatest trading edge</div></div></div>
+  <div class="callout co-b"><i class="fa-solid fa-circle-info"></i><div><div class="co-title">Why track emotions?</div><div class="co-body">Research shows 80%+ of trading losses are psychology-driven. By tracking emotional states, you identify patterns that predict poor decision-making — before they cost real money.</div></div></div>
+
+  <div class="card mb14">
+    <div class="card-title"><i class="fa-solid fa-face-grin-beam"></i> Emotion Frequency Gallery — This Month</div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+      <div class="em-card"><div class="em-emoji">😌</div><div class="em-name">Calm</div><div class="em-freq">18 trades</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:90%;background:var(--green)"></div></div></div></div>
+      <div class="em-card"><div class="em-emoji">🎯</div><div class="em-name">Focused</div><div class="em-freq">14 trades</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:70%;background:var(--blue)"></div></div></div></div>
+      <div class="em-card"><div class="em-emoji">🤔</div><div class="em-name">Uncertain</div><div class="em-freq">4 trades</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:20%;background:var(--purple)"></div></div></div></div>
+      <div class="em-card"><div class="em-emoji">😰</div><div class="em-name">Anxious</div><div class="em-freq">6 trades</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:30%;background:var(--amber)"></div></div></div></div>
+      <div class="em-card"><div class="em-emoji">😤</div><div class="em-name">FOMO</div><div class="em-freq">3 trades</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:15%;background:var(--red)"></div></div></div></div>
+      <div class="em-card"><div class="em-emoji">😡</div><div class="em-name">Revenge</div><div class="em-freq">1 trade</div><div style="margin-top:6px"><div class="prog-bg"><div class="prog-fill" style="width:5%;background:var(--red)"></div></div></div></div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-triangle-exclamation"></i> Trigger Log</div>
+      <div class="toggle open"><div class="toggle-h" onclick="tog(this)"><span class="tag tr" style="font-size:9px">FOMO</span>&nbsp; Missing a big move causes me to chase <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Trigger:</strong> Watching a stock run without me after passing on the setup.<br><strong style="color:var(--t1)">Pattern:</strong> I enter late, chasing price near a short-term top.<br><strong style="color:var(--t1)">Fix:</strong> Write "There will always be another trade" pre-market. Keep watchlist loaded with quality setups so I'm never desperate.</div></div>
+      <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span class="tag tr" style="font-size:9px">REVENGE</span>&nbsp; After a loss I want to win it back <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Trigger:</strong> Hitting stop on a confident trade.<br><strong style="color:var(--t1)">Pattern:</strong> Immediately looking for next trade, sizing up.<br><strong style="color:var(--t1)">Fix:</strong> Mandatory 30-min break after any loss. Log the trade immediately while emotions are fresh.</div></div>
+      <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span class="tag ta" style="font-size:9px">OVERCONFIDENCE</span>&nbsp; Winning streak makes me size too large <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Trigger:</strong> Multiple consecutive wins creating an "invincible" feeling.<br><strong style="color:var(--t1)">Fix:</strong> Position size is ALWAYS calculated from the formula — never gut feeling. Spreadsheet check before every entry.</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-chart-bar"></i> Win Rate by Emotional State</div>
+      <div class="cw" style="height:220px"><canvas id="c-emotion" role="img" aria-label="Win rate by emotion: Calm 74%, Focused 71%, Uncertain 48%, Anxious 38%, FOMO 22%, Revenge 0%">Win rate drops dramatically with negative emotions — from 74% when calm to 0% when revenge trading.</canvas></div>
+    </div>
+  </div>
+  <div class="quote">"When you trade from fear, anger, or greed — you're not trading the market. You're trading your emotions."<cite>— Trading Psychology Principle</cite></div>
+</div>
+
+<!-- ── GOALS ── -->
+<div class="page" id="page-goals">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">🎯 Goals & Progress Tracker</div><div class="ph-sub">Q2 2025 · 3 active goals · 1 completed</div></div>
+    <div class="ph-actions"><button class="btn btn-g"><i class="fa-solid fa-plus"></i> Add Goal</button></div>
+  </div>
+
+  <div class="goal-card">
+    <div class="goal-head">
+      <div class="goal-icon" style="background:var(--gbg)">💰</div>
+      <div><div class="goal-title">Achieve $10,000 Net P&L by June 30</div><div class="goal-due">Due: Jun 30, 2025 · SMART Financial Goal</div></div>
+      <span class="tag ta" style="margin-left:auto">In Progress</span>
+    </div>
+    <div class="goal-prog-txt"><span style="color:var(--t2)">$8,420 / $10,000</span><span style="color:var(--green)">84%</span></div>
+    <div class="prog-bg"><div class="prog-fill" style="width:84%;background:var(--green)"></div></div>
+    <div class="goal-note">$1,580 remaining · ~11 trading days · Need avg +$143/day</div>
+  </div>
+
+  <div class="goal-card">
+    <div class="goal-head">
+      <div class="goal-icon" style="background:var(--bbg)">📈</div>
+      <div><div class="goal-title">Maintain 60%+ Win Rate for Full Quarter</div><div class="goal-due">Due: Jun 30, 2025 · Performance Consistency Goal</div></div>
+      <span class="tag tg" style="margin-left:auto">On Track</span>
+    </div>
+    <div class="goal-prog-txt"><span style="color:var(--t2)">Current: 64.2% · Target: 60%+</span><span style="color:var(--blue)">Exceeding ✓</span></div>
+    <div class="prog-bg"><div class="prog-fill" style="width:100%;background:var(--blue)"></div></div>
+    <div class="goal-note">Exceeding target by 4.2% — don't change what's working</div>
+  </div>
+
+  <div class="goal-card">
+    <div class="goal-head">
+      <div class="goal-icon" style="background:var(--pbg)">🧠</div>
+      <div><div class="goal-title">Log Every Trade for 60 Consecutive Days</div><div class="goal-due">Started: Apr 19, 2025 · Discipline & Habit Goal</div></div>
+      <span class="tag tg" style="margin-left:auto">✓ COMPLETED</span>
+    </div>
+    <div class="goal-prog-txt"><span style="color:var(--t2)">60/60 days · 100% streak</span><span style="color:var(--purple)">100%</span></div>
+    <div class="prog-bg"><div class="prog-fill" style="width:100%;background:var(--purple)"></div></div>
+    <div style="font-size:11px;color:var(--green);margin-top:7px">🏆 MILESTONE ACHIEVED Jun 18. Now targeting 90-day streak.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-graduation-cap"></i> Skill Development Log</div>
+    <div class="g2" style="margin-bottom:0">
+      <div>
+        <div style="font-size:10px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Technical Skills</div>
+        <div class="prog-row"><div class="prog-labels"><span>Reading Price Action</span><span style="color:var(--green)">Advanced</span></div><div class="prog-bg"><div class="prog-fill" style="width:85%;background:var(--green)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Volume Analysis</span><span style="color:var(--blue)">Proficient</span></div><div class="prog-bg"><div class="prog-fill" style="width:70%;background:var(--blue)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Options Basics</span><span style="color:var(--amber)">Learning</span></div><div class="prog-bg"><div class="prog-fill" style="width:35%;background:var(--amber)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Futures / /ES</span><span style="color:var(--t3)">Beginner</span></div><div class="prog-bg"><div class="prog-fill" style="width:15%;background:var(--t3)"></div></div></div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Psychology Skills</div>
+        <div class="prog-row"><div class="prog-labels"><span>Emotional Control</span><span style="color:var(--green)">Strong</span></div><div class="prog-bg"><div class="prog-fill" style="width:80%;background:var(--green)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Patience / Selectivity</span><span style="color:var(--blue)">Good</span></div><div class="prog-bg"><div class="prog-fill" style="width:72%;background:var(--blue)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Letting Winners Run</span><span style="color:var(--amber)">Developing</span></div><div class="prog-bg"><div class="prog-fill" style="width:45%;background:var(--amber)"></div></div></div>
+        <div class="prog-row"><div class="prog-labels"><span>Position Sizing Discipline</span><span style="color:var(--green)">Strong</span></div><div class="prog-bg"><div class="prog-fill" style="width:82%;background:var(--green)"></div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ANALYTICS ── -->
+<div class="page" id="page-analytics">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">📈 Analytics & Reviews</div><div class="ph-sub">Deep performance analysis · Growth tracking over time</div></div>
+    <div class="ph-actions">
+      <button class="btn"><i class="fa-solid fa-calendar-week"></i> Weekly Review</button>
+      <button class="btn btn-b"><i class="fa-solid fa-file-chart-column"></i> Monthly Report</button>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-chart-line"></i> Full Equity Curve — YTD</div>
+      <div class="cw" style="height:195px"><canvas id="c-eq2" role="img" aria-label="Full equity curve showing growth from $20,000 to $38,420">Full equity curve showing consistent upward growth with two drawdown periods.</canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-arrow-down-short-wide"></i> Drawdown Chart</div>
+      <div class="cw" style="height:195px"><canvas id="c-dd" role="img" aria-label="Drawdown chart showing max drawdown of 14.2% in February">Drawdown chart with max drawdown of 14.2% in Feb, now recovering to -1.1%.</canvas></div>
+    </div>
+  </div>
+
+  <div class="card mb14">
+    <div class="card-title"><i class="fa-solid fa-table-cells"></i> Weekly P&L Heatmap — June 2025</div>
+    <div class="hmap-grid">
+      <div></div>
+      <div class="hmap-head">Mon</div><div class="hmap-head">Tue</div><div class="hmap-head">Wed</div><div class="hmap-head">Thu</div><div class="hmap-head">Fri</div>
+      <div class="hmap-row-label">Wk 1</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$840</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$320</div>
+      <div class="hmap-cell" style="background:var(--rbg);color:var(--red)">-$180</div>
+      <div class="hmap-cell" style="background:rgba(34,212,122,0.18);color:var(--green)">+$1,240</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$580</div>
+      <div class="hmap-row-label">Wk 2</div>
+      <div class="hmap-cell" style="background:rgba(34,212,122,0.18);color:var(--green)">+$1,820</div>
+      <div class="hmap-cell" style="background:var(--rbg);color:var(--red)">-$420</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$940</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$380</div>
+      <div class="hmap-cell" style="background:var(--rbg);color:var(--red)">-$250</div>
+      <div class="hmap-row-label">Wk 3</div>
+      <div class="hmap-cell" style="background:rgba(34,212,122,0.22);color:var(--green)">+$2,140</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$680</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$490</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$720</div>
+      <div class="hmap-cell" style="background:var(--gbg);color:var(--green)">+$310</div>
+    </div>
+  </div>
+
+  <div class="toggle open"><div class="toggle-h" onclick="tog(this)"><i class="fa-solid fa-calendar-week" style="color:var(--t3);font-size:12px"></i>&nbsp; Weekly Review Template — Week of Jun 2–6 <i class="fa-solid fa-chevron-right chev"></i></div>
+    <div class="toggle-body">
+      <div class="rev-q">What was the market environment this week?</div>
+      <div class="rev-a">Bullish trend with tech leading. High volatility Mon–Tue due to NVDA earnings. Choppy mid-week. Friday had clean directional moves — best day for setups.</div>
+      <div class="rev-q">What setups worked best?</div>
+      <div class="rev-a">Bull Flag Breakouts remained highest-probability. VWAP reclaims worked well Wed and Fri. Opening Drive plays were clean on non-news days.</div>
+      <div class="rev-q">Top 3 improvements for next week</div>
+      <div class="rev-a" style="margin-bottom:0">1. Use price alerts instead of staring at charts — reduces emotional interference.<br>2. Record a pre-market video walkthrough to stay accountable to thesis.<br>3. Journal within 30 min of close — not in the evening when memory fades.</div>
+    </div>
+  </div>
+
+  <div class="toggle" style="margin-top:6px"><div class="toggle-h" onclick="tog(this)"><i class="fa-solid fa-chart-mixed" style="color:var(--t3);font-size:12px"></i>&nbsp; Monthly Deep Review — May 2025 <i class="fa-solid fa-chevron-right chev"></i></div>
+    <div class="toggle-body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        <div class="stat-card sc-g" style="padding:10px"><div class="stat-label">May Net P&L</div><div class="stat-value sv-g" style="font-size:16px">+$4,220</div></div>
+        <div class="stat-card sc-b" style="padding:10px"><div class="stat-label">Trades</div><div class="stat-value sv-b" style="font-size:16px">28</div></div>
+        <div class="stat-card sc-a" style="padding:10px"><div class="stat-label">Win Rate</div><div class="stat-value sv-a" style="font-size:16px">63%</div></div>
+        <div class="stat-card sc-p" style="padding:10px"><div class="stat-label">Avg R-Mult</div><div class="stat-value sv-p" style="font-size:16px">+1.72R</div></div>
+      </div>
+      <div class="rev-a" style="margin-bottom:0">May was a strong month driven by excellent execution in weeks 1–2. The mid-month drawdown was handled well — respected daily loss limits, stopped early on two days. Biggest lesson: scaling into winners when price action confirms is leaving money on the table.</div>
+    </div>
+  </div>
+
+  <div class="callout co-g" style="margin-top:14px"><i class="fa-solid fa-chart-simple"></i><div><div class="co-title">Live Chart Integration Guide</div><div class="co-body">Export Notion database as CSV weekly → import to Google Sheets → publish as webpage → embed URL in Notion using /embed block. Or use TradingView paper portfolio for live equity curve tracking.</div></div></div>
+</div>
+
+<!-- ── LANDING PAGE ── -->
+<div class="page" id="page-landing">
+  <div class="ph"><div class="ph-left"><div class="ph-title">🛒 Sales Landing Page</div><div class="ph-sub">Copy this to Gumroad, Lemon Squeezy, or your website</div></div></div>
+
+  <div class="hero">
+    <div style="display:inline-flex;align-items:center;gap:6px;background:var(--bbg);border:1px solid var(--bborder);border-radius:20px;padding:4px 13px;font-size:9px;font-weight:700;color:var(--blue);letter-spacing:.1em;text-transform:uppercase;margin-bottom:16px">⭐ Trusted by 2,400+ active traders</div>
+    <h1>Stop Losing Money<br>to <span>Emotions & Bad Habits</span></h1>
+    <p>The Ultimate Trading Journal gives you the exact system professional traders use to track, analyze, and continuously improve their edge — beautifully built in Notion.</p>
+    <div style="display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="price-badge"><s>$97</s> $47 Today</div>
+      <button class="btn btn-g" style="font-size:14px;padding:11px 26px">Get Instant Access →</button>
+    </div>
+    <div class="cta-note">✓ One-time payment &nbsp;·&nbsp; ✓ Instant Notion duplicate &nbsp;·&nbsp; ✓ Free lifetime updates &nbsp;·&nbsp; ✓ 30-day guarantee</div>
+  </div>
+
+  <div class="feat-grid">
+    <div class="feat-card"><i class="fa-solid fa-chart-line"></i><h3>Performance Dashboard</h3><p>Track equity curve, win rate, P&L, expectancy, and 15+ metrics updated automatically as you log trades.</p></div>
+    <div class="feat-card"><i class="fa-solid fa-brain"></i><h3>Psychology Tracking</h3><p>Identify emotional patterns, triggers, and how they correlate with your best and worst trading days.</p></div>
+    <div class="feat-card"><i class="fa-solid fa-database"></i><h3>Master Trade Database</h3><p>Unlimited trade logging with 20+ properties, 6 filtered views, auto-calculated formulas, and chart uploads.</p></div>
+    <div class="feat-card"><i class="fa-solid fa-sun"></i><h3>Daily Log System</h3><p>Pre-market routine, trade-by-trade logging with screenshots, post-market reflection, and adherence scoring.</p></div>
+    <div class="feat-card"><i class="fa-solid fa-bullseye"></i><h3>SMART Goals & Progress</h3><p>Set financial, performance, and discipline goals with visual progress bars and milestone celebrations.</p></div>
+    <div class="feat-card"><i class="fa-solid fa-file-chart-column"></i><h3>Weekly & Monthly Reviews</h3><p>Structured templates to conduct deep performance reviews and extract compounding lessons over time.</p></div>
+  </div>
+
+  <div class="card mb14">
+    <div class="card-title"><i class="fa-solid fa-quote-left"></i> Trader Testimonials</div>
+    <div class="g3" style="margin-bottom:0">
+      <div style="background:var(--bg3);border-radius:10px;padding:14px"><div style="font-size:12px;color:var(--t2);line-height:1.7;margin-bottom:10px">"This template transformed my trading. Went from random guessing to systematic execution. Win rate up 18% in 3 months."</div><div style="font-size:10px;font-weight:700">@TradingWithAlex</div><div style="font-size:10px;color:var(--t3)">Day Trader · 2 years</div></div>
+      <div style="background:var(--bg3);border-radius:10px;padding:14px"><div style="font-size:12px;color:var(--t2);line-height:1.7;margin-bottom:10px">"The psychology tracking alone is worth 10x the price. I finally understand WHY I was blowing up accounts. Game changer."</div><div style="font-size:10px;font-weight:700">@SwingTrader_K</div><div style="font-size:10px;color:var(--t3)">Swing Trader · 5 years</div></div>
+      <div style="background:var(--bg3);border-radius:10px;padding:14px"><div style="font-size:12px;color:var(--t2);line-height:1.7;margin-bottom:10px">"Used this for 60 days straight. Best investment I've made in my trading career. The daily review process is gold."</div><div style="font-size:10px;font-weight:700">@FXTrader_M</div><div style="font-size:10px;color:var(--t3)">Forex Trader · 3 years</div></div>
+    </div>
+  </div>
+
+  <div class="callout co-g"><i class="fa-solid fa-circle-check"></i><div><div class="co-title">What's Included</div><div class="co-body">8 fully built sections · Dashboard with live charts · Daily log template · Master trade database with formulas · Psychology journal · Goals tracker · Weekly & monthly review templates · Resources library · Setup guide PDF · 3 example filled trade days · Free lifetime updates</div></div></div>
+</div>
+
+<!-- ── SETUP GUIDE ── -->
+<div class="page" id="page-setup">
+  <div class="ph">
+    <div class="ph-left"><div class="ph-title">📖 Setup Guide</div><div class="ph-sub">Get fully operational in under 30 minutes</div></div>
+    <div class="ph-actions"><button class="btn btn-b"><i class="fa-solid fa-download"></i> Download PDF Guide</button></div>
+  </div>
+
+  <div class="callout co-g"><i class="fa-solid fa-rocket"></i><div><div class="co-title">Quick Start — 3 Steps</div><div class="co-body">Step 1: Duplicate template → Step 2: Fill in your Trading Plan & Rules → Step 3: Log your first trade in Daily Log. You're up and running today.</div></div></div>
+
+  <div class="toggle open"><div class="toggle-h" onclick="tog(this)"><span style="background:var(--bbg);color:var(--blue);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">1</span>&nbsp; How to Duplicate This Template <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body">1. Open the template link while logged into Notion.<br>2. Click "Duplicate" button in the top-right corner.<br>3. Choose your workspace from the dropdown.<br>4. Wait 30–60 seconds for all pages and databases to copy.<br>5. Template appears in sidebar as "TradingOS — Trading Journal".<br><br><strong style="color:var(--amber)">Important:</strong> Don't share your duplicated copy publicly — this shares your personal trade data.</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span style="background:var(--bbg);color:var(--blue);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">2</span>&nbsp; Personalizing Your Trading Plan <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body">1. Navigate to "📋 Trading Plan & Rules".<br>2. Replace all placeholder text with YOUR actual rules.<br>3. Update Risk Parameters table with your account size.<br>4. Edit Allowed Setups to match your specific strategy.<br>5. Read your plan every morning before markets open.<br><br><strong style="color:var(--green)">Pro tip:</strong> Screenshot your rules and set it as your phone wallpaper.</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span style="background:var(--bbg);color:var(--blue);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">3</span>&nbsp; Setting Up the Trade Database <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body">1. Go to "🗃️ Master Trade Database".<br>2. Pre-configured with all properties and formulas — nothing to set up.<br>3. Click "+ New" to add your first trade.<br>4. Fill in: Date, Symbol, Direction, Setup, Entry/Exit, Stop, Target.<br>5. Formulas auto-calculate R-Multiple, P&L%, and R:R Ratio.<br>6. Upload chart screenshot to the Files property.<br><br><strong style="color:var(--blue)">Note:</strong> Dashboard stats pull from this database. Log every trade here for accurate metrics.</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span style="background:var(--bbg);color:var(--blue);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">4</span>&nbsp; Daily Workflow — How to Use Every Day <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Pre-Market (30 min before open):</strong><br>→ Duplicate Daily Log template for today's date<br>→ Complete mindset check (mood, sleep, energy)<br>→ Write pre-market notes and game plan<br><br><strong style="color:var(--t1)">During Trading:</strong><br>→ Log each trade immediately after execution<br>→ Upload chart screenshots right after each trade closes<br>→ Note emotional state during each trade<br><br><strong style="color:var(--t1)">Post-Market (within 60 min of close):</strong><br>→ Complete daily summary section<br>→ Answer the 3 reflection questions honestly<br>→ Add trades to the Master Trade Database</div></div>
+  <div class="toggle"><div class="toggle-h" onclick="tog(this)"><span style="background:var(--bbg);color:var(--blue);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">5</span>&nbsp; Connecting Live Charts (Google Sheets / TradingView) <i class="fa-solid fa-chevron-right chev"></i></div><div class="toggle-body"><strong style="color:var(--t1)">Method 1 — Google Sheets (Recommended):</strong><br>1. Export Notion database as CSV weekly<br>2. Import into Google Sheets → auto-generates charts<br>3. Publish Google Sheet as webpage<br>4. Embed URL in Notion using /embed block<br><br><strong style="color:var(--t1)">Method 2 — TradingView:</strong><br>1. Create paper portfolio on TradingView with trade history<br>2. Share → Publish Chart → Embed code → paste into Notion /embed<br><br><strong style="color:var(--t1)">Method 3 — Notion Native Charts:</strong><br>In any linked database view → switch to "Chart" view type → select Bar or Line for monthly P&L visualization.</div></div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-title"><i class="fa-solid fa-books"></i> Recommended Reading — Trader's Library</div>
+    <div class="g2" style="margin-bottom:0">
+      <div>
+        <div class="rule-item"><span style="font-size:16px">📗</span><div><div style="font-weight:600;font-size:12px">Trading in the Zone</div><div style="font-size:11px;color:var(--t3)">Mark Douglas · Psychology foundation</div></div></div>
+        <div class="rule-item"><span style="font-size:16px">📘</span><div><div style="font-weight:600;font-size:12px">Market Wizards</div><div style="font-size:11px;color:var(--t3)">Jack Schwager · Pro trader interviews</div></div></div>
+        <div class="rule-item" style="border:none"><span style="font-size:16px">📙</span><div><div style="font-weight:600;font-size:12px">The Disciplined Trader</div><div style="font-size:11px;color:var(--t3)">Mark Douglas · Mental discipline</div></div></div>
+      </div>
+      <div>
+        <div class="rule-item"><span style="font-size:16px">📕</span><div><div style="font-weight:600;font-size:12px">Reminiscences of a Stock Operator</div><div style="font-size:11px;color:var(--t3)">Edwin Lefèvre · Classic biography</div></div></div>
+        <div class="rule-item"><span style="font-size:16px">📗</span><div><div style="font-weight:600;font-size:12px">How to Make Money in Stocks</div><div style="font-size:11px;color:var(--t3)">William O'Neil · CAN SLIM method</div></div></div>
+        <div class="rule-item" style="border:none"><span style="font-size:16px">📘</span><div><div style="font-weight:600;font-size:12px">One Good Trade</div><div style="font-size:11px;color:var(--t3)">Mike Bellafiore · Professional training</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<script>
+function nav(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const p = document.getElementById('page-' + id);
+  if (p) p.classList.add('active');
+  if (btn) btn.classList.add('active');
+  else {
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'" + id + "'")) b.classList.add('active');
+    });
+  }
+}
+
+function tog(h) {
+  h.closest('.toggle').classList.toggle('open');
+}
+
+function setm(id, val) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  const cls = id === 'm2' ? 'on-g' : id === 'm3' ? 'on-p' : '';
+  c.querySelectorAll('.md').forEach((d, i) => {
+    d.classList.toggle('on', i < val);
+    if (cls) d.classList.toggle(cls, i < val);
+  });
+  const v = document.getElementById(id + 'v');
+  if (v) v.textContent = val + '/10';
+}
+
+const gridColor = 'rgba(255,255,255,0.04)';
+const tickStyle = { color: '#4e5a75', font: { size: 10, family: 'JetBrains Mono' } };
+const baseOpts = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1e263a', titleColor: '#eef0f8', bodyColor: '#8b95b0', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, padding: 10 } },
+  scales: { x: { grid: { color: gridColor }, ticks: tickStyle }, y: { grid: { color: gridColor }, ticks: tickStyle } }
+};
+const mo = ['Jan','Feb','Mar','Apr','May','Jun'];
+
+function mk(id, type, data, opts) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  new Chart(el, { type, data, options: { ...baseOpts, ...opts } });
+}
+
+mk('c-equity', 'line', {
+  labels: mo,
+  datasets: [{ data: [25000,23900,27100,29740,33960,38420], borderColor:'#22d47a', backgroundColor:'rgba(34,212,122,0.07)', fill:true, tension:0.4, pointRadius:4, pointBackgroundColor:'#22d47a', borderWidth:2 }]
+}, { scales: { x: { grid:{color:gridColor}, ticks:tickStyle }, y: { grid:{color:gridColor}, ticks:{ ...tickStyle, callback: v => '$' + (v/1000).toFixed(0) + 'k' } } } });
+
+mk('c-wr', 'line', {
+  labels: mo,
+  datasets: [{ data:[54,41,61,60,63,64], borderColor:'#4f8ef7', backgroundColor:'rgba(79,142,247,0.07)', fill:true, tension:0.4, pointRadius:3, borderWidth:2 }]
+}, { scales: { x:{grid:{color:gridColor},ticks:tickStyle}, y:{grid:{color:gridColor},ticks:{...tickStyle, callback: v => v+'%'}} } });
+
+mk('c-rm', 'line', {
+  labels: mo,
+  datasets: [{ data:[1.1,0.8,1.4,1.6,1.72,1.84], borderColor:'#9b7cf4', backgroundColor:'rgba(155,124,244,0.07)', fill:true, tension:0.4, pointRadius:3, borderWidth:2 }]
+}, { scales: { x:{grid:{color:gridColor},ticks:tickStyle}, y:{grid:{color:gridColor},ticks:{...tickStyle, callback: v => v.toFixed(1)+'R'}} } });
+
+mk('c-mpl', 'bar', {
+  labels: mo,
+  datasets: [{ data:[1840,-1100,3200,2640,4220,8420], backgroundColor:[1840,-1100,3200,2640,4220,8420].map(v=>v>=0?'rgba(34,212,122,0.7)':'rgba(240,82,82,0.7)'), borderRadius:4 }]
+}, { scales: { x:{grid:{color:gridColor},ticks:tickStyle}, y:{grid:{color:gridColor},ticks:{...tickStyle, callback: v=>(v>=0?'+':'')+('$'+(Math.abs(v)/1000).toFixed(1)+'k')}} } });
+
+mk('c-emotion', 'bar', {
+  labels: ['Calm','Focused','Uncertain','Anxious','FOMO','Revenge'],
+  datasets: [{ data:[74,71,48,38,22,0], backgroundColor:['rgba(34,212,122,0.7)','rgba(79,142,247,0.7)','rgba(155,124,244,0.6)','rgba(245,166,35,0.7)','rgba(240,82,82,0.7)','rgba(240,82,82,0.35)'], borderRadius:4, borderSkipped:false }]
+}, { indexAxis:'y', scales: { x:{grid:{color:gridColor},ticks:{...tickStyle,callback:v=>v+'%'},max:100}, y:{grid:{color:'transparent'},ticks:tickStyle} } });
+
+mk('c-eq2', 'line', {
+  labels: ['Jan','Feb','Mar','Apr','May','Jun'],
+  datasets: [{ data:[20000,21840,20740,23940,26580,30800,33960,38420].slice(0,6), borderColor:'#22d47a', backgroundColor:'rgba(34,212,122,0.06)', fill:true, tension:0.4, pointRadius:3, borderWidth:2 }]
+}, { scales: { x:{grid:{color:gridColor},ticks:tickStyle}, y:{grid:{color:gridColor},ticks:{...tickStyle, callback:v=>'$'+(v/1000).toFixed(0)+'k'}} } });
+
+mk('c-dd', 'line', {
+  labels: mo,
+  datasets: [{ data:[0,-14.2,-4.1,-6.8,-2.4,-1.1], borderColor:'#f05252', backgroundColor:'rgba(240,82,82,0.07)', fill:true, tension:0.4, pointRadius:3, borderWidth:2 }]
+}, { scales: { x:{grid:{color:gridColor},ticks:tickStyle}, y:{grid:{color:gridColor},ticks:{...tickStyle, callback:v=>v+'%'}, max:2} } });
+</script>
+</body>
+</html>
