@@ -20,7 +20,7 @@ export default function PlanPage() {
             <i className="fa-solid fa-triangle-exclamation"></i>
             <div>
               <div className="co-title">⚠️ Read This Every Morning Before Trading</div>
-              <div className="co-body">Your trading plan is your constitution. Every deviation is a vote against your future self. If a trade isn't in the plan — don't take it. Consistency beats perfection every time.</div>
+              <div className="co-body">Your trading plan is your constitution. Every deviation is a vote against your future self. If a trade isn&apos;t in the plan — don&apos;t take it. Consistency beats perfection every time.</div>
             </div>
           </div>
 
@@ -99,7 +99,7 @@ export default function PlanPage() {
             </div>
           </div>
 
-          <div className="quote">"The market is designed to transfer money from the impatient to the patient."<cite>— Warren Buffett</cite></div>
+          <div className="quote">&quot;The market is designed to transfer money from the impatient to the patient.&quot;<cite>— Warren Buffett</cite></div>
         </div>
       </main>
     </>

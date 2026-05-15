@@ -37,13 +37,13 @@ export default function PsychologyPage() {
             <div className="card">
               <div className="card-title"><i className="fa-solid fa-triangle-exclamation"></i> Trigger Log</div>
               <div className="toggle open"><div className="toggle-h"><span className="tag tr" style={{ fontSize: '9px' }}>FOMO</span>&nbsp; Missing a big move causes me to chase</div>
-                <div className="toggle-body"><strong style={{ color: 'var(--t1)' }}>Trigger:</strong> Watching a stock run without me after passing on the setup.<br /><strong style={{ color: 'var(--t1)' }}>Pattern:</strong> I enter late, chasing price near a short-term top.<br /><strong style={{ color: 'var(--t1)' }}>Fix:</strong> Write "There will always be another trade" pre-market. Keep watchlist loaded with quality setups so I'm never desperate.</div>
+                <div className="toggle-body"><strong style={{ color: 'var(--t1)' }}>Trigger:</strong> Watching a stock run without me after passing on the setup.<br /><strong style={{ color: 'var(--t1)' }}>Pattern:</strong> I enter late, chasing price near a short-term top.<br /><strong style={{ color: 'var(--t1)' }}>Fix:</strong> Write &quot;There will always be another trade&quot; pre-market. Keep watchlist loaded with quality setups so I&apos;m never desperate.</div>
               </div>
               <div className="toggle"><div className="toggle-h"><span className="tag tr" style={{ fontSize: '9px' }}>REVENGE</span>&nbsp; After a loss I want to win it back</div>
                 <div className="toggle-body"><strong style={{ color: 'var(--t1)' }}>Trigger:</strong> Hitting stop on a confident trade.<br /><strong style={{ color: 'var(--t1)' }}>Pattern:</strong> Immediately looking for next trade, sizing up.<br /><strong style={{ color: 'var(--t1)' }}>Fix:</strong> Mandatory 30-min break after any loss. Log the trade immediately while emotions are fresh.</div>
               </div>
               <div className="toggle"><div className="toggle-h"><span className="tag ta" style={{ fontSize: '9px' }}>OVERCONFIDENCE</span>&nbsp; Winning streak makes me size too large</div>
-                <div className="toggle-body"><strong style={{ color: 'var(--t1)' }}>Trigger:</strong> Multiple consecutive wins creating an "invincible" feeling.<br /><strong style={{ color: 'var(--t1)' }}>Fix:</strong> Position size is ALWAYS calculated from the formula — never gut feeling. Spreadsheet check before every entry.</div>
+                <div className="toggle-body"><strong style={{ color: 'var(--t1)' }}>Trigger:</strong> Multiple consecutive wins creating an &quot;invincible&quot; feeling.<br /><strong style={{ color: 'var(--t1)' }}>Fix:</strong> Position size is ALWAYS calculated from the formula — never gut feeling. Spreadsheet check before every entry.</div>
               </div>
             </div>
             <div className="card">
@@ -52,7 +52,7 @@ export default function PsychologyPage() {
             </div>
           </div>
 
-          <div className="quote">"When you trade from fear, anger, or greed — you're not trading the market. You're trading your emotions."<cite>— Trading Psychology Principle</cite></div>
+          <div className="quote">&quot;When you trade from fear, anger, or greed — you&apos;re not trading the market. You&apos;re trading your emotions.&quot;<cite>— Trading Psychology Principle</cite></div>
         </div>
       </main>
     </>

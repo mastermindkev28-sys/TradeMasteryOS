@@ -18,7 +18,17 @@ const createMock = () => {
   return chain;
 };
 
+const mockAuth = {
+  getSession: async () => ({ data: { session: null }, error: null }),
+  onAuthStateChange: (_event: unknown, _cb: unknown) => ({
+    data: { subscription: { unsubscribe: () => {} } },
+  }),
+  signInWithPassword: async () => nullResponse,
+  signUp: async () => nullResponse,
+  signOut: async () => ({ error: null }),
+};
+
 export const supabase =
   supabaseUrl && supabaseAnonKey
     ? createClient(supabaseUrl, supabaseAnonKey)
-    : ({ from: () => createMock() } as any);
+    : ({ from: () => createMock(), auth: mockAuth } as any);

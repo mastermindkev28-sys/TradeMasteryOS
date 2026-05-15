@@ -41,7 +41,7 @@ export default function GoalsPage() {
             </div>
             <div className="goal-prog-txt"><span style={{ color: 'var(--t2)' }}>Current: 64.2% · Target: 60%+</span><span style={{ color: 'var(--blue)' }}>Exceeding ✓</span></div>
             <div className="prog-bg"><div className="prog-fill" style={{ width: '100%', background: 'var(--blue)' }}></div></div>
-            <div className="goal-note">Exceeding target by 4.2% — don't change what's working</div>
+            <div className="goal-note">Exceeding target by 4.2% — don&apos;t change what&apos;s working</div>
           </div>
 
           <div className="goal-card">

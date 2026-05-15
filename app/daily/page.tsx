@@ -54,10 +54,10 @@ export default function DailyPage() {
               <div className="rev-a" style={{ minHeight: '120px' }}>
                 <strong style={{ color: 'var(--t1)' }}>Overnight news:</strong> NVDA earnings beat after close. Tech gapping up 1.2% pre-market.<br /><br />
                 <strong style={{ color: 'var(--t1)' }}>Key levels:</strong> SPY $440 (resistance), QQQ $376 (support), NVDA $480 (gap fill)<br /><br />
-                <strong style={{ color: 'var(--t1)' }}>Today's focus:</strong> Wait for opening drive confirmation. Look for bull flags on high-volume leaders. NO chasing opens.
+                <strong style={{ color: 'var(--t1)' }}>Today&apos;s focus:</strong> Wait for opening drive confirmation. Look for bull flags on high-volume leaders. NO chasing opens.
               </div>
               <div className="quote" style={{ marginTop: '10px', marginBottom: 0 }}>
-                "I will only take trades that fit my plan today. Quality over quantity."<cite>— Morning Intention Statement</cite>
+                &quot;I will only take trades that fit my plan today. Quality over quantity.&quot;<cite>— Morning Intention Statement</cite>
               </div>
             </div>
           </div>
@@ -134,7 +134,7 @@ export default function DailyPage() {
               <div className="stat-card sc-p" style={{ padding: '13px' }}><div className="stat-label">Plan Adherence</div><div className="stat-value sv-p" style={{ fontSize: '18px' }}>9/10</div></div>
             </div>
             <div className="rev-q">What did I do well today?</div>
-            <div className="rev-a">Waited patiently for the NVDA setup instead of chasing the open. Respected my stop on the AAPL trade. Took profits at planned target — didn't get greedy.</div>
+            <div className="rev-a">Waited patiently for the NVDA setup instead of chasing the open. Respected my stop on the AAPL trade. Took profits at planned target — didn&apos;t get greedy.</div>
             <div className="rev-q">What would I improve?</div>
             <div className="rev-a">Entered AMD a bit early — should have waited for full candle close above resistance. Also checked P&L mid-trade. Keep chart full screen, hide P&L on open positions.</div>
             <div className="rev-q">Key lesson for tomorrow</div>
