@@ -28,7 +28,9 @@ const mockAuth = {
   signOut: async () => ({ error: null }),
 };
 
+const isValidUrl = (s: string) => { try { return /^https?:\/\//.test(new URL(s).href); } catch { return false; } };
+
 export const supabase =
-  supabaseUrl && supabaseAnonKey
+  supabaseUrl && supabaseAnonKey && isValidUrl(supabaseUrl)
     ? createClient(supabaseUrl, supabaseAnonKey)
     : ({ from: () => createMock(), auth: mockAuth } as any);
