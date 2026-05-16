@@ -1,7 +1,9 @@
-import Sidebar from '@/components/Sidebar';
-import Link from 'next/link';
+'use client';
 
-const plans = [
+import Sidebar from '@/components/Sidebar';
+import { useSupabaseAuth } from '@/components/useSupabaseAuth';
+
+const BASE_PLANS = [
   {
     name: 'Pro',
     price: '$29',
@@ -9,7 +11,7 @@ const plans = [
     description: 'Advanced metrics, psychology tracking, and growth tools for serious traders.',
     features: ['Unlimited trades', 'Dashboard overview', 'Trade database', 'Equity curve', 'Win rate trends', 'Setup tracking', 'Daily reflection'],
     button: 'Get Started',
-    href: 'https://checkout.paddle.com/checkout/product/12345',
+    baseHref: 'https://checkout.paddle.com/checkout/product/12345',
     variant: 'primary',
     badge: null,
   },
@@ -20,13 +22,22 @@ const plans = [
     description: 'All Pro features plus priority support, custom reporting, and workflow templates.',
     features: ['Everything in Pro', 'Premium analytics', 'Account review templates', 'Export & reports', 'Priority support', 'Early feature access'],
     button: 'Get Started',
-    href: 'https://checkout.paddle.com/checkout/product/67890',
+    baseHref: 'https://checkout.paddle.com/checkout/product/67890',
     variant: 'primary',
     badge: 'Most Popular',
   },
 ];
 
 export default function PricingPage() {
+  const { session } = useSupabaseAuth();
+
+  const plans = BASE_PLANS.map((plan) => ({
+    ...plan,
+    href: session?.user?.id
+      ? `${plan.baseHref}?custom_data[user_id]=${session.user.id}`
+      : plan.baseHref,
+  }));
+
   return (
     <>
       <Sidebar />

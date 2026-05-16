@@ -80,6 +80,9 @@ export default function Sidebar() {
         <Link className={`nav-btn ${pathname === '/refund-policy' ? 'active' : ''}`} href="/refund-policy">
           <i className="fa-solid fa-hand-holding-dollar"></i> Refund Policy
         </Link>
+        <Link className={`nav-btn ${pathname === '/privacy' ? 'active' : ''}`} href="/privacy">
+          <i className="fa-solid fa-shield-halved"></i> Privacy Policy
+        </Link>
         <Link className={`nav-btn ${pathname === '/setup' ? 'active' : ''}`} href="/setup">
           <i className="fa-solid fa-book"></i> Setup Guide
         </Link>
