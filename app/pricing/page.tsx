@@ -3,33 +3,26 @@ import Link from 'next/link';
 
 const plans = [
   {
-    name: 'Starter',
-    price: '$0',
-    description: 'Perfect for new traders who want a private journal and basic analytics.',
-    features: ['Unlimited trades', 'Dashboard overview', 'Trade database', 'Basic insights'],
-    button: 'Start for free',
-    href: '/signup',
-    variant: 'secondary',
-  },
-  {
     name: 'Pro',
     price: '$29',
     period: '/month',
     description: 'Advanced metrics, psychology tracking, and growth tools for serious traders.',
-    features: ['Equity curve', 'Win rate trends', 'Setup tracking', 'Daily reflection'],
-    button: 'Checkout with Paddle',
+    features: ['Unlimited trades', 'Dashboard overview', 'Trade database', 'Equity curve', 'Win rate trends', 'Setup tracking', 'Daily reflection'],
+    button: 'Get Started',
     href: 'https://checkout.paddle.com/checkout/product/12345',
     variant: 'primary',
+    badge: null,
   },
   {
     name: 'Premium',
     price: '$49',
     period: '/month',
     description: 'All Pro features plus priority support, custom reporting, and workflow templates.',
-    features: ['Premium analytics', 'Account review templates', 'Export & reports', 'Early feature access'],
-    button: 'Checkout with Paddle',
+    features: ['Everything in Pro', 'Premium analytics', 'Account review templates', 'Export & reports', 'Priority support', 'Early feature access'],
+    button: 'Get Started',
     href: 'https://checkout.paddle.com/checkout/product/67890',
     variant: 'primary',
+    badge: 'Most Popular',
   },
 ];
 
@@ -60,8 +53,13 @@ export default function PricingPage() {
 
           <div className="plan-grid">
             {plans.map((plan) => (
-              <div key={plan.name} className={`plan-card ${plan.variant === 'primary' ? 'featured' : ''}`}>
+              <div key={plan.name} className={`plan-card featured ${plan.badge ? 'plan-card-highlight' : ''}`}>
                 <div>
+                  {plan.badge && (
+                    <div style={{ marginBottom: '10px' }}>
+                      <span className="tag tg" style={{ fontSize: '10px' }}>{plan.badge}</span>
+                    </div>
+                  )}
                   <div className="plan-label">{plan.name}</div>
                   <div className="plan-price">
                     {plan.price}
@@ -78,15 +76,9 @@ export default function PricingPage() {
                   ))}
                 </div>
                 <div className="plan-action">
-                  {plan.href.startsWith('http') ? (
-                    <a className={`btn ${plan.variant === 'primary' ? 'btn-g' : ''}`} href={plan.href} target="_blank" rel="noreferrer">
-                      {plan.button}
-                    </a>
-                  ) : (
-                    <Link className={`btn ${plan.variant === 'primary' ? 'btn-g' : ''}`} href={plan.href}>
-                      {plan.button}
-                    </Link>
-                  )}
+                  <a className="btn btn-g" href={plan.href} target="_blank" rel="noreferrer">
+                    {plan.button}
+                  </a>
                 </div>
               </div>
             ))}
