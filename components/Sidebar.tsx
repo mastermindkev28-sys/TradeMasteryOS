@@ -54,6 +54,13 @@ export default function Sidebar() {
       </div>
 
       <div className="sb-section">
+        <div className="sb-section-label">Gold Bot</div>
+        <Link className={`nav-btn ${pathname === '/bot' ? 'active' : ''}`} href="/bot">
+          <i className="fa-solid fa-robot"></i> Bot Control <span className="nb">Live</span>
+        </Link>
+      </div>
+
+      <div className="sb-section">
         <div className="sb-section-label">Growth</div>
         <Link className={`nav-btn ${pathname === '/psychology' ? 'active' : ''}`} href="/psychology">
           <i className="fa-solid fa-brain"></i> Psychology

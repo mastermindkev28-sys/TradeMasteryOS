@@ -1,0 +1,88 @@
+// ============================================================
+// GoldMaster Alert Generator — TradingView Indicator
+// Used when you want alerts WITHOUT strategy backtesting overhead
+// Attach this to chart, set alerts to fire webhook to your server
+// ============================================================
+//@version=5
+indicator(title="GoldMaster Alerts | XAUUSD", shorttitle="GMA", overlay=true)
+
+// ─────────────────────────────────────────────
+// CORE INDICATORS (mirrored from strategy)
+// ─────────────────────────────────────────────
+atr14   = ta.atr(14)
+ema9    = ta.ema(close, 9)
+ema21   = ta.ema(close, 21)
+ema50   = ta.ema(close, 50)
+ema200  = ta.ema(close, 200)
+vwap_val = ta.vwap(hlc3)
+rsi14   = ta.rsi(close, 14)
+[diPlus, diMinus, adxVal] = ta.dmi(14, 14)
+vol_sma = ta.sma(volume, 20)
+vol_ratio = volume / vol_sma
+mom12   = ta.mom(close, 12)
+roc5    = ta.roc(close, 5)
+
+ema200_htf = request.security(syminfo.tickerid, "240", ta.ema(close, 200), lookahead=barmerge.lookahead_off)
+ema50_htf  = request.security(syminfo.tickerid, "240", ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
+
+htf_bullish = close > ema200_htf and ema50_htf > ema200_htf
+htf_bearish = close < ema200_htf and ema50_htf < ema200_htf
+micro_bull  = ema9 > ema21 and ema21 > ema50
+micro_bear  = ema9 < ema21 and ema21 < ema50
+
+hour_utc    = hour(time, "UTC")
+in_london   = hour_utc >= 7  and hour_utc < 16
+in_ny       = hour_utc >= 13 and hour_utc < 20
+is_dead_zone= hour_utc >= 20 or hour_utc < 2
+
+// Signal score
+bull_score = (htf_bullish ? 15 : 0) + (micro_bull ? 10 : 0) + (close > ema200 ? 5 : 0) +
+             (mom12 > 0 ? 8 : 0) + (roc5 > 0 ? 7 : 0) + (rsi14 > 50 and rsi14 < 70 ? 10 : 0) +
+             (vol_ratio > 1.3 ? 10 : 0) + (vol_ratio > 2.0 ? 5 : 0) +
+             (close > open ? 8 : 0) + (adxVal > 20 ? 8 : 0) + (diPlus > diMinus ? 7 : 0)
+
+bear_score = (htf_bearish ? 15 : 0) + (micro_bear ? 10 : 0) + (close < ema200 ? 5 : 0) +
+             (mom12 < 0 ? 8 : 0) + (roc5 < 0 ? 7 : 0) + (rsi14 < 50 and rsi14 > 30 ? 10 : 0) +
+             (vol_ratio > 1.3 ? 10 : 0) + (vol_ratio > 2.0 ? 5 : 0) +
+             (close < open ? 8 : 0) + (adxVal > 20 ? 8 : 0) + (diMinus > diPlus ? 7 : 0)
+
+trend_bull_entry = htf_bullish and micro_bull and rsi14 > 40 and rsi14 < 65 and
+                   (in_london or in_ny) and not is_dead_zone and bull_score >= 65
+
+trend_bear_entry = htf_bearish and micro_bear and rsi14 < 60 and rsi14 > 35 and
+                   (in_london or in_ny) and not is_dead_zone and bear_score >= 65
+
+// Plot markers only
+plotshape(trend_bull_entry, "LONG Signal",  shape.triangleup,   location.belowbar, color.new(color.lime, 0), size=size.normal)
+plotshape(trend_bear_entry, "SHORT Signal", shape.triangledown, location.abovebar, color.new(color.red,  0), size=size.normal)
+
+// Score labels
+if trend_bull_entry
+    label.new(bar_index, low - atr14 * 0.5, "↑ " + str.tostring(bull_score),
+              color=color.new(color.lime,20), textcolor=color.white, style=label.style_label_up, size=size.small)
+if trend_bear_entry
+    label.new(bar_index, high + atr14 * 0.5, "↓ " + str.tostring(bear_score),
+              color=color.new(color.red,20), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// ─────────────────────────────────────────────
+// WEBHOOK ALERT PAYLOADS
+// Configure alerts on these conditions in TradingView
+// Set Webhook URL to: https://yourserver.com/api/tradingview/webhook
+// ─────────────────────────────────────────────
+alertcondition(
+    trend_bull_entry,
+    title   = "GoldMaster BUY Signal",
+    message = '{"action":"BUY","symbol":"XAUUSD","price":{{close}},"atr":{{plot_0}},"score":' + str.tostring(bull_score) + ',"rsi":{{plot_1}},"time":"{{timenow}}","tf":"{{interval}}"}'
+)
+
+alertcondition(
+    trend_bear_entry,
+    title   = "GoldMaster SELL Signal",
+    message = '{"action":"SELL","symbol":"XAUUSD","price":{{close}},"atr":{{plot_0}},"score":' + str.tostring(bear_score) + ',"rsi":{{plot_1}},"time":"{{timenow}}","tf":"{{interval}}"}'
+)
+
+// Hidden plots for alert placeholders
+plot(atr14,  "atr",  display=display.none)
+plot(rsi14,  "rsi",  display=display.none)
+plot(bull_score, "bull_score", display=display.none)
+plot(bear_score, "bear_score", display=display.none)

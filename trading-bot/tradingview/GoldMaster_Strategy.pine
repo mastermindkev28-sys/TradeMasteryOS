@@ -1,0 +1,458 @@
+// ============================================================
+// GoldMaster Pro — TradingView Strategy
+// XAUUSD Gold Trading System | Prop Firm Edition
+// Targets: $1000-1500 net profit/week on $100K account
+// Max Daily Loss: 3% | Max Drawdown: 6% | Min R:R 2:1
+// ============================================================
+//@version=5
+strategy(
+    title         = "GoldMaster Pro | XAUUSD Prop Firm Edition",
+    shorttitle    = "GMP",
+    overlay       = true,
+    default_qty_type  = strategy.percent_of_equity,
+    default_qty_value = 1,
+    commission_type   = strategy.commission.cash_per_contract,
+    commission_value  = 0.07,
+    slippage      = 2,
+    max_bars_back = 500,
+    calc_on_order_fills = true,
+    process_orders_on_close = false
+)
+
+// ─────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────
+grp_risk = "Risk Management (Prop Firm)"
+risk_pct        = input.float(0.75,  "Risk Per Trade (%)", minval=0.1, maxval=2.0,  step=0.1,  group=grp_risk, tooltip="0.75% = $750 risk on $100K account")
+rr_min          = input.float(2.0,   "Min Risk/Reward Ratio",  minval=1.5, maxval=5.0,  step=0.1,  group=grp_risk)
+max_daily_loss  = input.float(3.0,   "Max Daily Loss (%)",     minval=1.0, maxval=5.0,  step=0.5,  group=grp_risk)
+max_dd          = input.float(6.0,   "Max Total Drawdown (%)", minval=2.0, maxval=10.0, step=1.0,  group=grp_risk)
+max_trades_day  = input.int(3,       "Max Trades Per Day",     minval=1,   maxval=10,   group=grp_risk)
+prop_mode       = input.bool(true,   "Prop Firm Mode",         group=grp_risk, tooltip="Strict risk controls for passing prop firm challenges")
+
+grp_strategy = "Strategy Selection"
+use_london_bo   = input.bool(true,  "London Session Breakout",  group=grp_strategy)
+use_trend_pull  = input.bool(true,  "Trend + Pullback (H4/H1)", group=grp_strategy)
+use_vwap_rev    = input.bool(false, "VWAP Mean Reversion",      group=grp_strategy)
+use_session_mo  = input.bool(true,  "NY Session Momentum",      group=grp_strategy)
+
+grp_filters = "Entry Filters"
+min_signal_score = input.int(65,  "Min Signal Score (0-100)", minval=40, maxval=100, step=5, group=grp_filters)
+atr_mult_sl      = input.float(1.5, "ATR Multiplier (Stop Loss)",  minval=0.5, maxval=4.0, step=0.25, group=grp_filters)
+atr_mult_tp      = input.float(3.5, "ATR Multiplier (Take Profit)", minval=1.5, maxval=8.0, step=0.25, group=grp_filters)
+use_adx_filter   = input.bool(true,  "ADX Trend Filter",       group=grp_filters)
+adx_min          = input.int(20,     "Min ADX Value",          minval=10, maxval=40, group=grp_filters)
+use_rsi_filter   = input.bool(true,  "RSI Overbought/Oversold Filter", group=grp_filters)
+rsi_ob           = input.int(70,     "RSI Overbought",         minval=60, maxval=85, group=grp_filters)
+rsi_os           = input.int(30,     "RSI Oversold",           minval=15, maxval=40, group=grp_filters)
+use_vol_filter   = input.bool(true,  "Volume Filter",          group=grp_filters)
+vol_mult         = input.float(1.3,  "Min Volume Multiplier",  minval=1.0, maxval=3.0, step=0.1, group=grp_filters)
+
+grp_sessions = "Trading Sessions (UTC)"
+london_open     = input.int(7,  "London Open Hour (UTC)",   minval=0, maxval=23, group=grp_sessions)
+london_close    = input.int(16, "London Close Hour (UTC)",  minval=0, maxval=23, group=grp_sessions)
+ny_open         = input.int(13, "NY Open Hour (UTC)",       minval=0, maxval=23, group=grp_sessions)
+ny_close        = input.int(20, "NY Close Hour (UTC)",      minval=0, maxval=23, group=grp_sessions)
+asian_open      = input.int(0,  "Asian Open Hour (UTC)",    minval=0, maxval=23, group=grp_sessions)
+asian_close     = input.int(7,  "Asian Close Hour (UTC)",   minval=0, maxval=23, group=grp_sessions)
+london_bo_range_hours = input.int(3, "London BO: Range Hours Before Open", minval=1, maxval=6, group=grp_sessions)
+
+grp_ema = "EMA Settings"
+ema_fast        = input.int(9,   "Fast EMA",   minval=3,  maxval=50,  group=grp_ema)
+ema_mid         = input.int(21,  "Mid EMA",    minval=10, maxval=100, group=grp_ema)
+ema_slow        = input.int(50,  "Slow EMA",   minval=20, maxval=200, group=grp_ema)
+ema_trend       = input.int(200, "Trend EMA",  minval=50, maxval=500, group=grp_ema)
+
+grp_display = "Display"
+show_emas       = input.bool(true,  "Show EMAs",           group=grp_display)
+show_sessions   = input.bool(true,  "Show Session Boxes",  group=grp_display)
+show_signals    = input.bool(true,  "Show Signal Labels",  group=grp_display)
+show_levels     = input.bool(true,  "Show S/R Levels",     group=grp_display)
+show_score      = input.bool(true,  "Show Signal Score",   group=grp_display)
+
+// ─────────────────────────────────────────────
+// CORE INDICATORS
+// ─────────────────────────────────────────────
+// ATR for dynamic stop/target sizing
+atr14   = ta.atr(14)
+atr7    = ta.atr(7)
+
+// EMAs
+ema9    = ta.ema(close, ema_fast)
+ema21   = ta.ema(close, ema_mid)
+ema50   = ta.ema(close, ema_slow)
+ema200  = ta.ema(close, ema_trend)
+
+// VWAP
+vwap_val = ta.vwap(hlc3)
+
+// RSI
+rsi14   = ta.rsi(close, 14)
+rsi7    = ta.rsi(close, 7)
+
+// ADX + DI (manual calculation for v5)
+adx_len = 14
+[diPlus, diMinus, adxVal] = ta.dmi(adx_len, adx_len)
+
+// Bollinger Bands (20, 2)
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, 20, 2.0)
+bb_width = (bb_upper - bb_lower) / bb_mid
+
+// Volume analysis
+vol_sma = ta.sma(volume, 20)
+vol_ratio = volume / vol_sma
+
+// Stochastic
+stoch_k = ta.stoch(close, high, low, 14)
+stoch_d = ta.sma(stoch_k, 3)
+
+// Momentum
+mom12   = ta.mom(close, 12)
+roc5    = ta.roc(close, 5)
+
+// Higher timeframe trend (D1 equivalent using H4 EMA200)
+ema200_htf = request.security(syminfo.tickerid, "240", ta.ema(close, 200), lookahead=barmerge.lookahead_off)
+rsi_htf    = request.security(syminfo.tickerid, "240", ta.rsi(close, 14),  lookahead=barmerge.lookahead_off)
+ema50_htf  = request.security(syminfo.tickerid, "240", ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
+
+// ─────────────────────────────────────────────
+// SESSION DETECTION
+// ─────────────────────────────────────────────
+hour_utc        = hour(time, "UTC")
+minute_utc      = minute(time, "UTC")
+
+in_london       = hour_utc >= london_open  and hour_utc < london_close
+in_ny           = hour_utc >= ny_open      and hour_utc < ny_close
+in_asian        = hour_utc >= asian_open   and hour_utc < asian_close
+in_london_open  = hour_utc >= london_open  and hour_utc < (london_open + 3)  // London open first 3 hours
+in_ny_open      = hour_utc >= ny_open      and hour_utc < (ny_open + 2)      // NY open first 2 hours
+
+// No trading in dead zones
+is_dead_zone    = hour_utc >= 20 or hour_utc < 2  // UTC 20:00 - 02:00
+
+// ─────────────────────────────────────────────
+// LONDON SESSION BREAKOUT RANGE
+// ─────────────────────────────────────────────
+// Range built during asian session before london open
+range_start_hour = london_open - london_bo_range_hours
+in_range_window  = hour_utc >= range_start_hour and hour_utc < london_open
+
+var float range_high = na
+var float range_low  = na
+var bool  range_set  = false
+var int   last_range_day = na
+
+// Reset range daily
+current_day = dayofweek(time, "UTC")
+if ta.change(time("D")) != 0
+    range_high := na
+    range_low  := na
+    range_set  := false
+
+if in_range_window
+    range_high := na(range_high) ? high : math.max(range_high, high)
+    range_low  := na(range_low)  ? low  : math.min(range_low, low)
+    range_set  := true
+
+range_size     = na(range_high) or na(range_low) ? na : range_high - range_low
+range_midpoint = na(range_high) or na(range_low) ? na : (range_high + range_low) / 2
+
+// ─────────────────────────────────────────────
+// SUPPORT & RESISTANCE LEVELS
+// ─────────────────────────────────────────────
+// Pivot Points (Daily)
+pivot_high_daily = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_on)
+pivot_low_daily  = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_on)
+pivot_close_daily= request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+
+pp  = (pivot_high_daily + pivot_low_daily + pivot_close_daily) / 3
+r1  = 2 * pp - pivot_low_daily
+r2  = pp + (pivot_high_daily - pivot_low_daily)
+s1  = 2 * pp - pivot_high_daily
+s2  = pp - (pivot_high_daily - pivot_low_daily)
+
+// ─────────────────────────────────────────────
+// TREND DETERMINATION
+// ─────────────────────────────────────────────
+// H4 macro trend
+htf_bullish  = close > ema200_htf and ema50_htf > ema200_htf
+htf_bearish  = close < ema200_htf and ema50_htf < ema200_htf
+
+// Current TF micro trend
+micro_bull   = ema9 > ema21 and ema21 > ema50
+micro_bear   = ema9 < ema21 and ema21 < ema50
+
+// Trend alignment (macro + micro)
+trend_bull   = htf_bullish and micro_bull
+trend_bear   = htf_bearish and micro_bear
+
+// Momentum confirmation
+mom_bull     = mom12 > 0 and roc5 > 0
+mom_bear     = mom12 < 0 and roc5 < 0
+
+// ─────────────────────────────────────────────
+// SIGNAL SCORING ENGINE (0-100)
+// Composite score combining multiple factors
+// ─────────────────────────────────────────────
+f_bull_score() =>
+    score = 0
+    // Trend alignment (30 pts)
+    score += htf_bullish ? 15 : 0
+    score += micro_bull   ? 10 : 0
+    score += close > ema200 ? 5 : 0
+    // Momentum (25 pts)
+    score += mom12 > 0   ? 8 : 0
+    score += roc5 > 0    ? 7 : 0
+    score += rsi14 > 50 and rsi14 < 70 ? 10 : 0
+    // Volume (15 pts)
+    score += vol_ratio > vol_mult ? 10 : 0
+    score += vol_ratio > 2.0      ? 5  : 0
+    // Candle structure (15 pts)
+    bullish_candle = close > open
+    score += bullish_candle ? 8 : 0
+    body_size = math.abs(close - open)
+    candle_size = high - low
+    score += candle_size > 0 and body_size / candle_size > 0.6 ? 7 : 0
+    // ADX trend strength (15 pts)
+    score += adxVal > adx_min       ? 8 : 0
+    score += diPlus > diMinus ? 7 : 0
+    score
+
+f_bear_score() =>
+    score = 0
+    // Trend alignment (30 pts)
+    score += htf_bearish  ? 15 : 0
+    score += micro_bear    ? 10 : 0
+    score += close < ema200 ? 5 : 0
+    // Momentum (25 pts)
+    score += mom12 < 0   ? 8 : 0
+    score += roc5 < 0    ? 7 : 0
+    score += rsi14 < 50 and rsi14 > 30 ? 10 : 0
+    // Volume (15 pts)
+    score += vol_ratio > vol_mult ? 10 : 0
+    score += vol_ratio > 2.0      ? 5  : 0
+    // Candle structure (15 pts)
+    bearish_candle = close < open
+    score += bearish_candle ? 8 : 0
+    body_size = math.abs(close - open)
+    candle_size = high - low
+    score += candle_size > 0 and body_size / candle_size > 0.6 ? 7 : 0
+    // ADX trend strength (15 pts)
+    score += adxVal > adx_min        ? 8 : 0
+    score += diMinus > diPlus ? 7 : 0
+    score
+
+bull_score = f_bull_score()
+bear_score = f_bear_score()
+
+// ─────────────────────────────────────────────
+// STRATEGY 1: LONDON SESSION BREAKOUT
+// ─────────────────────────────────────────────
+// Entry: Price breaks above/below the pre-London range
+// Stop: 50% of range below breakout point + ATR buffer
+// Target: 1.5x-2x range extension
+
+london_bull_bo = use_london_bo and range_set and in_london_open and
+                 ta.crossover(close, range_high) and
+                 volume > vol_sma * vol_mult and
+                 bull_score >= min_signal_score - 10
+
+london_bear_bo = use_london_bo and range_set and in_london_open and
+                 ta.crossunder(close, range_low) and
+                 volume > vol_sma * vol_mult and
+                 bear_score >= min_signal_score - 10
+
+// ─────────────────────────────────────────────
+// STRATEGY 2: TREND PULLBACK (EMA BOUNCE)
+// ─────────────────────────────────────────────
+// Entry: H4 trend confirmed, price pulls back to EMA21/50 and bounces
+// Stop: Below the ema50 + 1.0 ATR
+// Target: Previous swing high/low or 3x ATR
+
+ema_bounce_zone_bull = close >= ema21 * 0.9985 and close <= ema50 * 1.0020
+ema_bounce_zone_bear = close <= ema21 * 1.0015 and close >= ema50 * 0.9980
+
+// Confirmation: RSI not overbought and bouncing
+rsi_bull_ok = not use_rsi_filter or (rsi14 > rsi_os and rsi14 < rsi_ob and rsi14 > rsi14[2])
+rsi_bear_ok = not use_rsi_filter or (rsi14 < rsi_ob and rsi14 > rsi_os and rsi14 < rsi14[2])
+
+// Stochastic confirmation
+stoch_bull_ok = stoch_k < 30 or stoch_k > stoch_d
+stoch_bear_ok = stoch_k > 70 or stoch_k < stoch_d
+
+trend_bull_entry = use_trend_pull and trend_bull and
+                   ema_bounce_zone_bull and rsi_bull_ok and
+                   (in_london or in_ny) and not is_dead_zone and
+                   bull_score >= min_signal_score
+
+trend_bear_entry = use_trend_pull and trend_bear and
+                   ema_bounce_zone_bear and rsi_bear_ok and
+                   (in_london or in_ny) and not is_dead_zone and
+                   bear_score >= min_signal_score
+
+// ─────────────────────────────────────────────
+// STRATEGY 3: NY SESSION MOMENTUM
+// ─────────────────────────────────────────────
+// Entry: Strong momentum at NY open aligning with H4 trend
+// Uses VWAP as confluence filter
+
+ny_bull_momentum = use_session_mo and in_ny_open and
+                   htf_bullish and close > vwap_val and
+                   mom_bull and vol_ratio > 1.5 and
+                   adxVal > adx_min and diPlus > diMinus and
+                   bull_score >= min_signal_score
+
+ny_bear_momentum = use_session_mo and in_ny_open and
+                   htf_bearish and close < vwap_val and
+                   mom_bear and vol_ratio > 1.5 and
+                   adxVal > adx_min and diMinus > diPlus and
+                   bear_score >= min_signal_score
+
+// ─────────────────────────────────────────────
+// STRATEGY 4: VWAP MEAN REVERSION
+// ─────────────────────────────────────────────
+// Entry: Price deviates 2+ ATR from VWAP, RSI extreme, reverting
+vwap_dev = math.abs(close - vwap_val)
+vwap_ov_bought = use_vwap_rev and close > vwap_val + (2 * atr14) and rsi14 > rsi_ob - 5
+vwap_ov_sold   = use_vwap_rev and close < vwap_val - (2 * atr14) and rsi14 < rsi_os + 5
+
+// Reversal candle confirmation
+bull_rev_candle = close > open and close > close[1] and low < low[1]
+bear_rev_candle = close < open and close < close[1] and high > high[1]
+
+vwap_rev_bull = vwap_ov_sold and bull_rev_candle and vol_ratio > 1.2
+vwap_rev_bear = vwap_ov_bought and bear_rev_candle and vol_ratio > 1.2
+
+// ─────────────────────────────────────────────
+// COMPOSITE ENTRY SIGNALS
+// ─────────────────────────────────────────────
+go_long  = (london_bull_bo or trend_bull_entry or ny_bull_momentum or vwap_rev_bull) and
+           not is_dead_zone and
+           (not use_adx_filter or adxVal > adx_min)
+
+go_short = (london_bear_bo or trend_bear_entry or ny_bear_momentum or vwap_rev_bear) and
+           not is_dead_zone and
+           (not use_adx_filter or adxVal > adx_min)
+
+// ─────────────────────────────────────────────
+// RISK MANAGEMENT — DYNAMIC STOP & TARGET
+// ─────────────────────────────────────────────
+// ATR-based stop loss
+sl_long  = close - (atr14 * atr_mult_sl)
+sl_short = close + (atr14 * atr_mult_sl)
+
+// R:R based take profit
+tp1_long  = close + (atr14 * atr_mult_sl * rr_min)         // TP1 at 2R
+tp2_long  = close + (atr14 * atr_mult_tp)                   // TP2 at full extension
+tp1_short = close - (atr14 * atr_mult_sl * rr_min)
+tp2_short = close - (atr14 * atr_mult_tp)
+
+// For London BO — use range-based targets
+lb_sl_long  = range_set ? range_midpoint - atr14 * 0.5    : sl_long
+lb_tp_long  = range_set ? range_high + range_size * 1.5   : tp2_long
+lb_sl_short = range_set ? range_midpoint + atr14 * 0.5    : sl_short
+lb_tp_short = range_set ? range_low - range_size * 1.5    : tp2_short
+
+// ─────────────────────────────────────────────
+// DAILY P&L TRACKING (Prop Firm Guard)
+// ─────────────────────────────────────────────
+var float daily_pnl   = 0.0
+var float trade_count = 0
+var int   last_trade_day = na
+
+is_new_day = ta.change(time("D")) != 0
+if is_new_day
+    daily_pnl   := 0.0
+    trade_count := 0
+
+// Block trading if daily loss limit or trade count reached
+daily_loss_exceeded = prop_mode and (daily_pnl < -(strategy.equity * max_daily_loss / 100))
+trade_limit_reached = prop_mode and trade_count >= max_trades_day
+
+can_trade = not daily_loss_exceeded and not trade_limit_reached
+
+// ─────────────────────────────────────────────
+// STRATEGY EXECUTION
+// ─────────────────────────────────────────────
+// Determine entry type for correct SL/TP
+entry_is_london_bo = london_bull_bo or london_bear_bo
+
+if go_long and can_trade and strategy.position_size == 0
+    sl   = entry_is_london_bo ? lb_sl_long  : sl_long
+    tp   = entry_is_london_bo ? lb_tp_long  : tp1_long
+    strategy.entry("LONG", strategy.long, comment="GMP LONG " + str.tostring(bull_score))
+    strategy.exit("LONG_EXIT", "LONG", stop=sl, limit=tp, comment="Exit")
+    trade_count := trade_count + 1
+
+if go_short and can_trade and strategy.position_size == 0
+    sl   = entry_is_london_bo ? lb_sl_short : sl_short
+    tp   = entry_is_london_bo ? lb_tp_short : tp1_short
+    strategy.entry("SHORT", strategy.short, comment="GMP SHORT " + str.tostring(bear_score))
+    strategy.exit("SHORT_EXIT", "SHORT", stop=sl, limit=tp, comment="Exit")
+    trade_count := trade_count + 1
+
+// ─────────────────────────────────────────────
+// TRAILING STOP (activate after 1R profit)
+// ─────────────────────────────────────────────
+trail_offset = atr14 * 1.0
+if strategy.position_size > 0
+    strategy.exit("LONG_TRAIL", "LONG", trail_offset=trail_offset, trail_price=strategy.position_avg_price + atr14 * atr_mult_sl)
+if strategy.position_size < 0
+    strategy.exit("SHORT_TRAIL", "SHORT", trail_offset=trail_offset, trail_price=strategy.position_avg_price - atr14 * atr_mult_sl)
+
+// ─────────────────────────────────────────────
+// PLOTTING
+// ─────────────────────────────────────────────
+// EMAs
+plot(show_emas ? ema9   : na, "EMA 9",   color=color.new(color.yellow, 0),  linewidth=1)
+plot(show_emas ? ema21  : na, "EMA 21",  color=color.new(color.orange, 0),  linewidth=1)
+plot(show_emas ? ema50  : na, "EMA 50",  color=color.new(color.blue,   0),  linewidth=2)
+plot(show_emas ? ema200 : na, "EMA 200", color=color.new(color.white,  30), linewidth=2)
+plot(vwap_val,                "VWAP",    color=color.new(color.purple, 0),  linewidth=1, style=plot.style_circles)
+
+// London Range
+plot(show_levels and range_set ? range_high : na, "Range High", color=color.new(color.aqua, 0), linewidth=1, style=plot.style_line)
+plot(show_levels and range_set ? range_low  : na, "Range Low",  color=color.new(color.aqua, 0), linewidth=1, style=plot.style_line)
+
+// Pivot Levels
+plot(show_levels ? pp : na, "PP", color=color.new(color.gray, 40), linewidth=1, style=plot.style_circles)
+plot(show_levels ? r1 : na, "R1", color=color.new(color.red,  50), linewidth=1)
+plot(show_levels ? s1 : na, "S1", color=color.new(color.green,50), linewidth=1)
+
+// Session background shading
+bgcolor(show_sessions and in_london_open ? color.new(color.blue,  93) : na, title="London Open")
+bgcolor(show_sessions and in_ny_open     ? color.new(color.green, 93) : na, title="NY Open")
+bgcolor(show_sessions and is_dead_zone   ? color.new(color.red,   97) : na, title="No-Trade Zone")
+
+// Entry signals
+plotshape(show_signals and go_long  ? low  : na, "LONG",  shape.labelup,   location.belowbar, color.new(color.lime,0),  size=size.normal, text="LONG")
+plotshape(show_signals and go_short ? high : na, "SHORT", shape.labeldown, location.abovebar, color.new(color.red, 0),  size=size.normal, text="SHORT")
+
+// Signal score display
+if show_score and go_long
+    label.new(bar_index, low - atr14, "Score: " + str.tostring(bull_score) + "/100",
+              color=color.new(color.lime, 20), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if show_score and go_short
+    label.new(bar_index, high + atr14, "Score: " + str.tostring(bear_score) + "/100",
+              color=color.new(color.red, 20), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// Prop firm status bar
+var table prop_table = table.new(position.top_right, 2, 4, border_width=1)
+if barstate.islast
+    table.cell(prop_table, 0, 0, "PROP GUARD",   text_color=color.white,  bgcolor=color.new(color.navy, 0), text_size=size.small)
+    table.cell(prop_table, 1, 0, prop_mode ? "ON" : "OFF", text_color=color.white, bgcolor=prop_mode ? color.new(color.green,30) : color.new(color.red,30), text_size=size.small)
+    table.cell(prop_table, 0, 1, "Daily Loss",   text_color=color.white,  bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(prop_table, 1, 1, str.tostring(daily_pnl, "#.##"), text_color=daily_pnl >= 0 ? color.green : color.red, bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(prop_table, 0, 2, "Trades Today", text_color=color.white,  bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(prop_table, 1, 2, str.tostring(trade_count) + "/" + str.tostring(max_trades_day), text_color=color.white, bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(prop_table, 0, 3, "Can Trade",    text_color=color.white,  bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(prop_table, 1, 3, can_trade ? "YES" : "NO", text_color=color.white, bgcolor=can_trade ? color.new(color.green,30) : color.new(color.red,30), text_size=size.small)
+
+// ─────────────────────────────────────────────
+// ALERTS (for webhook integration)
+// ─────────────────────────────────────────────
+alertcondition(go_long  and can_trade, "GoldMaster LONG",  '{"action":"BUY","symbol":"XAUUSD","score":{{plot("bull_score")}},"atr":"{{plot("atr14")}}","close":"{{close}}","time":"{{time}}"}')
+alertcondition(go_short and can_trade, "GoldMaster SHORT", '{"action":"SELL","symbol":"XAUUSD","score":{{plot("bear_score")}},"atr":"{{plot("atr14")}}","close":"{{close}}","time":"{{time}}"}')
+alertcondition(daily_loss_exceeded,    "Daily Loss Limit Reached!", "GoldMaster: Daily loss limit hit. Trading suspended.")
+alertcondition(trade_limit_reached,    "Trade Limit Reached!",      "GoldMaster: Max trades per day reached.")
