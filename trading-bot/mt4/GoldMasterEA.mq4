@@ -1,19 +1,17 @@
 //+------------------------------------------------------------------+
-//| GoldMaster Pro EA v6.1 — Maximum Profit / Compounding           |
+//| GoldMaster Pro EA v6.2 — Unlimited Runner / Compounding         |
 //| XAUUSD only                                                      |
 //|                                                                   |
-//| PHILOSOPHY: Let winners run as far as possible.                  |
-//|   - No partial close. Full position stays open.                  |
-//|   - Breakeven at 1R (capital protection only).                   |
-//|   - ATR trailing stop activates at 2R (Chandelier-style).        |
-//|   - Trail width = 2.5x ATR — wide enough for gold volatility.    |
-//|   - Hard TP ceiling at 8R so we don't overstay.                  |
+//| PHILOSOPHY: No fixed profit target. Trades close via trail only. |
+//|   - Entry -> SL hit = full loss (controlled risk)                |
+//|   - Entry -> 1R profit -> SL moves to breakeven (can't lose)     |
+//|   - Entry -> 2R profit -> Chandelier trail activates             |
+//|     Trail = price - 2.5xATR. Ratchets up as price runs.         |
+//|     Trade closes ONLY when price reverses into the trail.        |
+//|   - No hard TP. A $500 day can become $5,000 if gold trends.    |
 //|                                                                   |
-//| COMPOUNDING MATH (conservative, 52% WR):                         |
-//|   Avg winner trails to ~3.5R before being stopped.               |
-//|   EV = 0.52 x 3.5R - 0.48 x 1R = 1.34R per trade               |
-//|   $50K @ 1% = $500 risk -> $670 EV/trade x 3/wk = ~$2,000/wk   |
-//|   Auto-compounds: $100K -> $1,340/trade -> $4,000/wk             |
+//| COMPOUNDING: uses AccountBalance() for sizing.                   |
+//|   $50K -> $500/trade. $100K -> $1,000/trade. Scales itself.     |
 //|                                                                   |
 //| STRATEGIES                                                        |
 //|   1. Asian Range Breakout  (07:00-10:00 UTC)                     |
@@ -23,7 +21,7 @@
 //+------------------------------------------------------------------+
 #property copyright "GoldMaster Pro"
 #property link      ""
-#property version   "6.10"
+#property version   "6.20"
 #property strict
 
 //=== RISK & COMPOUNDING ============================================
@@ -37,9 +35,8 @@ extern double SL_ATR          = 1.2;   // Initial stop = 1.2x ATR from entry
 extern double BE_R            = 1.0;   // Move SL to breakeven at 1R (capital guard)
 extern double TrailActivateR  = 2.0;   // Trail activates when 2R in profit
 extern double TrailATR        = 2.5;   // Trail width = 2.5x ATR (wide, lets it run)
-extern double HardTP_R        = 8.0;   // Hard ceiling TP at 8R (don't overstay)
-extern bool   UseBreakeven    = true;  // Move SL to entry at 1R
-extern bool   UseTrail        = true;  // Activate trail at 2R, run to 8R
+extern bool   UseBreakeven    = true;  // Move SL to entry at 1R (capital guard)
+extern bool   UseTrail        = true;  // Trail-only exit — no fixed TP ceiling
 
 //=== REGIME FILTERS ================================================
 extern int    ATR_Period       = 14;
@@ -411,43 +408,32 @@ void ExecuteOrder(int dir)
 
    if(tSz <= 0 || tVal <= 0) { Print("GoldMaster: Tick data error."); return; }
 
-   double entry, sl, tp;
+   double entry, sl;
    int    otype;
 
    if(dir == 1)
      {
       entry = ask;
       sl    = NormalizeDouble(entry - atr * SL_ATR, digs);
-      tp    = NormalizeDouble(entry + atr * SL_ATR * HardTP_R, digs);
       otype = OP_BUY;
 
-      //--- Asian BO: structural SL below range low
+      //--- Asian BO: structural SL below range low (tighter, higher R potential)
       if(g_RangeReady && TimeHour(TimeGMT()) < London_Open + 3)
-        {
-         double rng = g_RangeHigh - g_RangeLow;
-         sl  = NormalizeDouble(g_RangeLow  - atr * 0.3, digs);
-         tp  = NormalizeDouble(g_RangeHigh + rng * HardTP_R * 0.5, digs);
-        }
+         sl = NormalizeDouble(g_RangeLow - atr * 0.3, digs);
      }
    else
      {
       entry = bid;
       sl    = NormalizeDouble(entry + atr * SL_ATR, digs);
-      tp    = NormalizeDouble(entry - atr * SL_ATR * HardTP_R, digs);
       otype = OP_SELL;
 
       if(g_RangeReady && TimeHour(TimeGMT()) < London_Open + 3)
-        {
-         double rng = g_RangeHigh - g_RangeLow;
-         sl  = NormalizeDouble(g_RangeHigh + atr * 0.3, digs);
-         tp  = NormalizeDouble(g_RangeLow  - rng * HardTP_R * 0.5, digs);
-        }
+         sl = NormalizeDouble(g_RangeHigh + atr * 0.3, digs);
      }
 
    double riskPts = MathAbs(entry - sl);
-   double rewPts  = MathAbs(tp - entry);
-   if(riskPts <= 0 || rewPts / riskPts < 2.0)
-     { Print("GoldMaster: R:R < 2.0. Skip."); return; }
+   if(riskPts <= 0)
+     { Print("GoldMaster: SL calc error. Skip."); return; }
 
    //--- Position size: % of AccountBalance() auto-compounds
    double riskUSD = AccountBalance() * RiskPct / 100.0;
