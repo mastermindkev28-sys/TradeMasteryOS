@@ -1,0 +1,29 @@
+# Core scientific stack
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+matplotlib>=3.8
+
+# Market data (free tier, daily bars)
+yfinance>=0.2.36
+
+# Live broker integrations
+requests>=2.31         # Tradovate REST API
+websockets>=12.0       # Tradovate WebSocket streaming (optional, for tick feed)
+
+# Optional: QuantConnect LEAN bridge
+# lean>=2.0             # install separately: pip install lean
+
+# Optional: Backtrader (alternative backtesting engine)
+# backtrader>=1.9.78
+
+# Optional: vectorbt (vectorised backtesting, fast parameter sweeps)
+# vectorbt>=0.26
+
+# Dev / notebook
+ipython>=8.0
+jupyter>=1.0
+tabulate>=0.9
+
+# Testing
+pytest>=7.4
