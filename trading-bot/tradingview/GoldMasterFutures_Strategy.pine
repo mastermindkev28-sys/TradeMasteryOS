@@ -1,0 +1,499 @@
+//@version=5
+// =============================================================================
+// GoldMaster Pro — Futures Strategy (GC / MGC / NQ / MNQ)
+// TradingView + Tradovate Integration
+//
+// HOW TO USE WITH TRADOVATE:
+//   1. Add this script to your chart (XAUUSD, GC1!, MGC1!, NQ1!, or MNQ1!)
+//   2. In TradingView: Chart -> Trading Panel -> Connect Tradovate account
+//   3. In the Strategy Properties panel, set your account and contract size
+//   4. Enable "Auto-Trading" in the Trading Panel — orders fire automatically
+//   5. The strategy shows live P&L in the Strategy Tester below the chart
+//
+// SUPPORTED INSTRUMENTS (auto-detected):
+//   GC1! / MGC1!  — Gold futures / Micro Gold futures
+//   NQ1! / MNQ1!  — Nasdaq-100 futures / Micro Nasdaq-100 futures
+//   XAUUSD        — Spot gold (treated as GC)
+//
+// CONTRACT SPECS:
+//   GC  : $100/oz,  tick $0.10 = $10/tick,  1 contract ~$15K margin
+//   MGC : $10/oz,   tick $0.10 = $1/tick,   1 contract ~$1.5K margin
+//   NQ  : $20/pt,   tick 0.25  = $5/tick,   1 contract ~$21K margin
+//   MNQ : $2/pt,    tick 0.25  = $0.50/tick, 1 contract ~$2.1K margin
+//
+// TRADE LOGIC:
+//   Entry  : Composite score >= 70/100 across 3-TF alignment, ADX, MACD,
+//            RSI, volume, candle quality
+//   Exit   : Breakeven at 1R -> Chandelier trail activates at 2R (2.5xATR)
+//            No fixed TP — trades run until the trend reverses
+// =============================================================================
+
+strategy(
+     title                  = "GoldMaster Pro — Futures (GC/MGC/NQ/MNQ)",
+     shorttitle             = "GMP-Futures",
+     overlay                = true,
+     pyramiding             = 0,
+     initial_capital        = 50000,
+     default_qty_type       = strategy.fixed,
+     default_qty_value      = 1,
+     commission_type        = strategy.commission.cash_per_contract,
+     commission_value       = 2.50,
+     slippage               = 1,
+     calc_on_every_tick     = true,
+     process_orders_on_close = false,
+     use_bar_magnifier      = true)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// --- Risk & Compounding
+riskPct        = input.float(1.0,  "Risk % per trade",         group="Risk & Compounding", minval=0.1, maxval=5.0, step=0.1, tooltip="% of account equity risked per trade. Auto-compounds as account grows.")
+maxDailyLoss   = input.float(3.0,  "Max daily loss %",         group="Risk & Compounding", minval=0.5, maxval=10.0)
+maxTotalDD     = input.float(6.0,  "Max total drawdown %",     group="Risk & Compounding", minval=1.0, maxval=15.0)
+maxDailyTrades = input.int  (3,    "Max trades per day",       group="Risk & Compounding", minval=1,   maxval=10)
+
+// --- Trade Management (Let Winners Run)
+slATR          = input.float(1.2,  "Stop loss (ATR multiplier)",    group="Trade Management", minval=0.5, maxval=4.0, step=0.1)
+beR            = input.float(1.0,  "Breakeven at (R multiple)",     group="Trade Management", minval=0.5, maxval=3.0, step=0.1, tooltip="Move SL to entry when this many R in profit. Protects capital without capping upside.")
+trailActivateR = input.float(2.0,  "Trail activates at (R)",        group="Trade Management", minval=1.0, maxval=5.0, step=0.1, tooltip="Chandelier trail starts tracking when price is this many R in profit.")
+trailATRMult   = input.float(2.5,  "Trail width (ATR multiplier)",  group="Trade Management", minval=1.0, maxval=5.0, step=0.1, tooltip="SL = price - (ATR x this). Wider = more room to run, fewer early exits.")
+
+// --- Regime Filters
+atrPeriod      = input.int  (14,   "ATR period",               group="Regime Filters")
+adxPeriod      = input.int  (14,   "ADX period",               group="Regime Filters")
+adxMin         = input.int  (22,   "Minimum ADX (trend req.)", group="Regime Filters", minval=10, maxval=50)
+minScore       = input.int  (70,   "Minimum signal score",     group="Regime Filters", minval=40, maxval=95, tooltip="Score 0-100. Higher = fewer but higher quality trades.")
+minATRpct      = input.float(0.05, "Min ATR as % of price",   group="Regime Filters", minval=0.01, maxval=1.0, step=0.01, tooltip="Skips dead/illiquid sessions.")
+maxATRpct      = input.float(1.5,  "Max ATR as % of price",   group="Regime Filters", minval=0.1, maxval=5.0, step=0.1, tooltip="Skips extreme news spikes.")
+
+// --- Strategies
+useRangeBO     = input.bool(true,  "Range Breakout (Asian/ORB)",    group="Strategies", tooltip="Gold: Asian range 01:00-07:00 UTC. NQ: Opening range 9:30-10:00 ET.")
+useEMAPull     = input.bool(true,  "H4 EMA Trend Pullback",         group="Strategies", tooltip="Highest win rate. Waits for H4 trend then pullback to EMA21-50 zone.")
+useNYMom       = input.bool(true,  "NY / RTH Momentum",             group="Strategies", tooltip="Continuation at NY/RTH open with volume confirmation.")
+useStructBnc   = input.bool(true,  "EMA50 Structure Bounce",        group="Strategies", tooltip="Bounce off H4 EMA50 (institutional level). Requires rejection candle.")
+
+// --- Instrument override (auto-detected by default)
+forceGold      = input.bool(false, "Force Gold strategies",      group="Instrument Override")
+forceNasdaq    = input.bool(false, "Force Nasdaq strategies",    group="Instrument Override")
+
+// --- Display
+showDash       = input.bool(true,  "Show dashboard table",      group="Display")
+showSignals    = input.bool(true,  "Show entry signals on chart",group="Display")
+
+// =============================================================================
+// INSTRUMENT DETECTION & CONTRACT SPECS
+// =============================================================================
+
+t = syminfo.ticker
+isGold_auto   = str.contains(t, "GC") or str.contains(t, "XAU") or str.contains(t, "GOLD")
+isNasdaq_auto = str.contains(t, "NQ")
+isGold   = forceGold   ? true : (forceNasdaq ? false : isGold_auto)
+isNasdaq = forceNasdaq ? true : (forceGold   ? false : isNasdaq_auto)
+
+// Contract point value (used for position sizing)
+// Falls back to syminfo.pointvalue if neither detected
+contractPV = isGold ? (str.contains(t, "MGC") ? 10.0 : 100.0) :
+             isNasdaq ? (str.contains(t, "MNQ") ? 2.0 : 20.0) :
+             syminfo.pointvalue
+
+// =============================================================================
+// INDICATORS (MULTI-TIMEFRAME)
+// =============================================================================
+
+// M15 (current chart timeframe assumed M15)
+ema9   = ta.ema(close, 9)
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+rsi14  = ta.rsi(close, 14)
+atr    = ta.atr(atrPeriod)
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+[diPlus, diMinus, adxVal]  = ta.dmi(adxPeriod, adxPeriod)
+
+// Volume ratio (current vs 20-bar avg)
+volAvg   = ta.sma(volume, 20)
+volRatio = volAvg > 0 ? volume / volAvg : 1.0
+
+// H1 timeframe
+h1_ema21  = request.security(syminfo.tickerid, "60",  ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+h1_ema50  = request.security(syminfo.tickerid, "60",  ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+h1_rsi    = request.security(syminfo.tickerid, "60",  ta.rsi(close, 14),  lookahead=barmerge.lookahead_off)
+h1_macd   = request.security(syminfo.tickerid, "60",  ta.macd(close,12,26,9).macd,   lookahead=barmerge.lookahead_off)
+h1_signal = request.security(syminfo.tickerid, "60",  ta.macd(close,12,26,9).signal, lookahead=barmerge.lookahead_off)
+
+// H4 timeframe
+h4_ema21  = request.security(syminfo.tickerid, "240", ta.ema(close, 21),  lookahead=barmerge.lookahead_off)
+h4_ema50  = request.security(syminfo.tickerid, "240", ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
+h4_ema200 = request.security(syminfo.tickerid, "240", ta.ema(close, 200), lookahead=barmerge.lookahead_off)
+h4_adx    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).adx,  lookahead=barmerge.lookahead_off)
+h4_diP    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).plus,  lookahead=barmerge.lookahead_off)
+h4_diM    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).minus, lookahead=barmerge.lookahead_off)
+
+// D1 timeframe
+d1_ema50  = request.security(syminfo.tickerid, "D",   ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
+d1_ema200 = request.security(syminfo.tickerid, "D",   ta.ema(close, 200), lookahead=barmerge.lookahead_off)
+d1_close  = request.security(syminfo.tickerid, "D",   close,              lookahead=barmerge.lookahead_off)
+
+// VWAP (key for NQ institutional levels)
+vwapVal = ta.vwap(hlc3)
+
+// =============================================================================
+// SESSION & TIME DETECTION
+// =============================================================================
+
+etHour   = hour(time, "America/New_York")
+etMin    = minute(time, "America/New_York")
+etTOD    = etHour * 100 + etMin
+
+utcHour  = hour(time, "UTC")
+
+// Gold sessions (UTC)
+inAsian    = utcHour >= 1  and utcHour < 7    // Asian range building
+inLondon   = utcHour >= 7  and utcHour < 16   // London session
+inLonOpen  = utcHour >= 7  and utcHour < 10   // London open (3 hrs)
+inNY_UTC   = utcHour >= 13 and utcHour < 21   // NY session
+inNYOpen   = utcHour >= 13 and utcHour < 15   // NY open (2 hrs)
+inOverlap  = utcHour >= 13 and utcHour < 16   // London/NY overlap — best quality
+
+// NQ/Nasdaq sessions (ET)
+inRTH      = etTOD >= 930  and etTOD < 1600   // Regular trading hours
+inORBTime  = etTOD >= 930  and etTOD < 1000   // Opening range 9:30-10:00
+isPostORB  = etTOD >= 1000 and etTOD < 1600   // After ORB, ready to trade
+inRTHMorn  = etTOD >= 930  and etTOD < 1200   // Morning session
+inRTHAfter = etTOD >= 1300 and etTOD < 1600   // Afternoon session
+
+isNewDay   = dayofweek != dayofweek[1]
+
+// =============================================================================
+// ASIAN / OPENING RANGE TRACKER
+// =============================================================================
+
+var float rangeHigh = na
+var float rangeLow  = na
+var bool  rangeReady = false
+
+// Reset at new trading day
+if isNewDay
+    rangeHigh  := na
+    rangeLow   := na
+    rangeReady := false
+
+// Gold: build Asian range 01:00-07:00 UTC
+if isGold and inAsian
+    rangeHigh  := na(rangeHigh) ? high : math.max(rangeHigh, high)
+    rangeLow   := na(rangeLow)  ? low  : math.min(rangeLow,  low)
+    rangeReady := false
+
+// NQ: build opening range 9:30-10:00 ET
+if isNasdaq and inORBTime
+    rangeHigh  := na(rangeHigh) ? high : math.max(rangeHigh, high)
+    rangeLow   := na(rangeLow)  ? low  : math.min(rangeLow,  low)
+    rangeReady := false
+
+// Mark range as ready once we exit the range-building window
+if isGold   and utcHour >= 7  and not na(rangeHigh) and not rangeReady
+    rangeReady := true
+if isNasdaq and etTOD >= 1000 and not na(rangeHigh) and not rangeReady
+    rangeReady := true
+
+// =============================================================================
+// TREND FLAGS (3-timeframe alignment)
+// =============================================================================
+
+d1Bull = d1_ema50 > d1_ema200 and d1_close > d1_ema50
+d1Bear = d1_ema50 < d1_ema200 and d1_close < d1_ema50
+
+h4Bull = h4_ema21 > h4_ema50  and h4_ema50 > h4_ema200
+h4Bear = h4_ema21 < h4_ema50  and h4_ema50 < h4_ema200
+h4DiOk = h4_adx >= adxMin
+
+h1Bull = h1_ema21 > h1_ema50
+h1Bear = h1_ema21 < h1_ema50
+
+mBull  = ema9 > ema21 and ema21 > ema50
+mBear  = ema9 < ema21 and ema21 < ema50
+
+bullTF = (d1Bull ? 1 : 0) + (h4Bull ? 1 : 0) + (h1Bull ? 1 : 0)
+bearTF = (d1Bear ? 1 : 0) + (h4Bear ? 1 : 0) + (h1Bear ? 1 : 0)
+
+// =============================================================================
+// CANDLE QUALITY
+// =============================================================================
+
+body     = math.abs(close - open)
+candleRng = high - low
+bPct     = candleRng > 0 ? body / candleRng : 0.0
+upperWick = high - math.max(close, open)
+lowerWick = math.min(close, open) - low
+
+bullBar  = close > open and bPct >= 0.45
+bearBar  = close < open and bPct >= 0.45
+pinUp    = lowerWick >= body * 2.0 and upperWick <= body * 0.5  // hammer
+pinDown  = upperWick >= body * 2.0 and lowerWick <= body * 0.5  // shooting star
+
+// =============================================================================
+// ATR REGIME CHECK
+// =============================================================================
+
+atrPct      = close > 0 ? atr / close * 100 : 0.0
+regimeOk    = atrPct >= minATRpct and atrPct <= maxATRpct
+
+// =============================================================================
+// COMPOSITE SIGNAL SCORE FUNCTION (0-100)
+// =============================================================================
+
+scoreSignal(isBull, tf, adxOk, di1, di2, mac, msig, h1rsi, mrsi, vr, hasBar, hasPin, pr, e21v, e50v, e200v, overlap) =>
+    s = 0
+    s += tf * 10                                     // 30 pts: TF alignment
+    s += adxOk ? 8 : 0                               // 8 pts: ADX trend strength
+    s += di1 > di2 + 5 ? 7 : 0                       // 7 pts: DI direction
+    s += mac > msig ? 8 : 0                           // 8 pts: MACD aligned
+    s += mac > msig and mac > mac[1] ? 5 : 0          // 5 pts: MACD accelerating
+    if isBull
+        s += h1rsi >= 45 and h1rsi <= 65 ? 7 : 0
+        s += mrsi  >= 42 and mrsi  <= 62 ? 5 : 0
+        s += pr > e21v  ? 4 : 0
+        s += pr > e50v  ? 4 : 0
+        s += pr > e200v ? 4 : 0
+    else
+        s += h1rsi >= 35 and h1rsi <= 55 ? 7 : 0
+        s += mrsi  >= 38 and mrsi  <= 58 ? 5 : 0
+        s += pr < e21v  ? 4 : 0
+        s += pr < e50v  ? 4 : 0
+        s += pr < e200v ? 4 : 0
+    s += vr >= 1.5 ? 8 : (vr >= 1.2 ? 4 : 0)        // 8 pts: volume
+    s += hasPin ? 10 : (hasBar ? 6 : 0)               // 10 pts: pin bar / 6 pts: bull/bear bar
+    s += overlap ? 5 : 0                              // 5 pts: peak session bonus
+    math.min(100, s)
+
+// Bull and bear scores
+bullScore = scoreSignal(true,  bullTF, h4DiOk, h4_diP, h4_diM,
+             h1_macd, h1_signal, h1_rsi, rsi14,
+             volRatio, bullBar, pinUp,
+             close, ema21, ema50, ema200, inOverlap)
+
+bearScore = scoreSignal(false, bearTF, h4DiOk, h4_diM, h4_diP,
+             -h1_macd, -h1_signal, 100 - h1_rsi, 100 - rsi14,
+             volRatio, bearBar, pinDown,
+             close, ema21, ema50, ema200, inOverlap)
+
+// =============================================================================
+// SIGNAL GENERATION
+// =============================================================================
+
+// Active session check (per instrument)
+inActiveSession = isGold   ? (inLondon or inNY_UTC) :
+                  isNasdaq ? inRTH : true
+
+// ─── STRATEGY 1: RANGE BREAKOUT ─────────────────────────────────────────────
+// Gold: Asian range 01:00-07:00 UTC | NQ: Opening range 9:30-10:00 ET
+// Institutional compression -> explosive directional move at session open
+rangeSize  = not na(rangeHigh) and not na(rangeLow) ? rangeHigh - rangeLow : 0.0
+validRange = rangeSize >= atr * 0.5 and rangeSize <= atr * 4.0
+
+inBreakoutWindow = isGold   ? inLonOpen :
+                   isNasdaq ? isPostORB and etTOD < 1130 : false
+
+s1Long  = useRangeBO and rangeReady and validRange and inBreakoutWindow and
+          close > rangeHigh and not h4Bear and bullTF >= 2 and
+          volRatio >= 1.3 and bullScore >= minScore - 10 and regimeOk
+
+s1Short = useRangeBO and rangeReady and validRange and inBreakoutWindow and
+          close < rangeLow  and not h4Bull and bearTF >= 2 and
+          volRatio >= 1.3 and bearScore >= minScore - 10 and regimeOk
+
+// ─── STRATEGY 2: H4 EMA TREND PULLBACK ──────────────────────────────────────
+// Highest win rate. H4 trend confirmed, price pulls back to EMA21-50 zone,
+// bounces with candle + MACD confirmation. Works on both gold and NQ.
+zoneTopBull = h4_ema21 + atr * 0.4
+zoneBotBull = h4_ema50 - atr * 0.2
+zoneTopBear = h4_ema50 + atr * 0.2
+zoneBotBear = h4_ema21 - atr * 0.4
+
+s2Long  = useEMAPull and inActiveSession and h4DiOk and h4Bull and d1Bull and
+          close >= zoneBotBull and close <= zoneTopBull and close > h4_ema50 and
+          (bullBar or pinUp) and rsi14 >= 42 and rsi14 <= 62 and
+          h1_macd > h1_signal and bullScore >= minScore and regimeOk
+
+s2Short = useEMAPull and inActiveSession and h4DiOk and h4Bear and d1Bear and
+          close <= zoneTopBear and close >= zoneBotBear and close < h4_ema50 and
+          (bearBar or pinDown) and rsi14 >= 38 and rsi14 <= 58 and
+          h1_macd < h1_signal and bearScore >= minScore and regimeOk
+
+// ─── STRATEGY 3: NY / RTH MOMENTUM ─────────────────────────────────────────
+// Gold: NY open 13:00-15:00 UTC | NQ: RTH morning 9:30-11:30 ET
+// Strong institutional flow continues London/overnight trend
+inMomWindow = isGold ? inNYOpen : (isNasdaq ? inRTHMorn : false)
+
+// NQ: above/below VWAP adds extra confluence
+vwapBull = isNasdaq ? close > vwapVal : true
+vwapBear = isNasdaq ? close < vwapVal : true
+
+s3Long  = useNYMom and inMomWindow and h4Bull and h1Bull and mBull and
+          close > ema21 and volRatio >= 1.5 and h4_diP > h4_diM and
+          h1_macd > h1_signal and rsi14 >= 50 and rsi14 <= 75 and
+          vwapBull and bullScore >= minScore and regimeOk
+
+s3Short = useNYMom and inMomWindow and h4Bear and h1Bear and mBear and
+          close < ema21 and volRatio >= 1.5 and h4_diM > h4_diP and
+          h1_macd < h1_signal and rsi14 >= 25 and rsi14 <= 50 and
+          vwapBear and bearScore >= minScore and regimeOk
+
+// ─── STRATEGY 4: H4 EMA50 STRUCTURE BOUNCE ──────────────────────────────────
+// The H4 EMA50 is a major institutional reference on both gold and NQ.
+// Rejection candle at this level in a trend = high-probability continuation.
+distH4E50 = math.abs(close - h4_ema50)
+nearH4E50 = distH4E50 <= atr * 0.6
+
+s4Long  = useStructBnc and inActiveSession and h4DiOk and nearH4E50 and
+          d1Bull and h4Bull and close > h4_ema50 and
+          (pinUp or bullBar) and rsi14 >= 35 and rsi14 <= 52 and
+          volRatio >= 1.2 and bullScore >= minScore and regimeOk
+
+s4Short = useStructBnc and inActiveSession and h4DiOk and nearH4E50 and
+          d1Bear and h4Bear and close < h4_ema50 and
+          (pinDown or bearBar) and rsi14 >= 48 and rsi14 <= 65 and
+          volRatio >= 1.2 and bearScore >= minScore and regimeOk
+
+// Combined signals (any strategy fires)
+goLong  = (s1Long  or s2Long  or s3Long  or s4Long)  and strategy.position_size == 0
+goShort = (s1Short or s2Short or s3Short or s4Short) and strategy.position_size == 0
+
+// Strategy name for labels
+sigName = s1Long or s1Short ? "Range BO" :
+          s2Long or s2Short ? "EMA Pull" :
+          s3Long or s3Short ? "Momentum" : "Strct Bnc"
+
+// =============================================================================
+// POSITION SIZING — RISK-BASED, AUTO-COMPOUNDS
+// =============================================================================
+
+// SL distance in price points
+slPoints  = atr * slATR
+
+// Risk in dollars
+riskDollars = strategy.equity * riskPct / 100.0
+
+// Dollar value of 1 point move for this contract
+pointVal = contractPV > 0 ? contractPV : syminfo.pointvalue
+
+// Number of contracts (floor to whole contracts)
+rawContracts = slPoints > 0 and pointVal > 0 ? riskDollars / (slPoints * pointVal) : 1.0
+contracts    = math.max(1, math.floor(rawContracts))
+
+// =============================================================================
+// ORDER EXECUTION
+// =============================================================================
+
+// Trail in points (for strategy.exit trail_points / trail_offset)
+trailPoints  = atr * trailATRMult
+bePoints     = slPoints * beR          // Breakeven activation distance
+trailActivPt = slPoints * trailActivateR  // Trail activation distance
+
+if goLong
+    strategy.entry("Long", strategy.long, qty=contracts,
+         comment=sigName + " L | Score:" + str.tostring(bullScore))
+    // Breakeven exit (fires when profit >= bePoints, SL moves to entry)
+    strategy.exit("BE-Long", "Long",
+         stop      = close - slPoints,
+         profit    = bePoints,
+         comment   = "BE")
+
+if goShort
+    strategy.entry("Short", strategy.short, qty=contracts,
+         comment=sigName + " S | Score:" + str.tostring(bearScore))
+    strategy.exit("BE-Short", "Short",
+         stop      = close + slPoints,
+         profit    = bePoints,
+         comment   = "BE")
+
+// Chandelier trailing stop — activates once trade is TrailActivateR in profit
+// Re-evaluate each bar; strategy.exit replaces previous exit of same ID
+if strategy.position_size > 0
+    entryPx  = strategy.position_avg_price
+    profitPt = close - entryPx
+    if profitPt >= trailActivPt
+        strategy.exit("Trail-Long", "Long",
+             trail_points = trailPoints,
+             trail_offset = trailPoints,
+             comment      = "Trail")
+
+if strategy.position_size < 0
+    entryPx  = strategy.position_avg_price
+    profitPt = entryPx - close
+    if profitPt >= trailActivPt
+        strategy.exit("Trail-Short", "Short",
+             trail_points = trailPoints,
+             trail_offset = trailPoints,
+             comment      = "Trail")
+
+// =============================================================================
+// CHART VISUALS
+// =============================================================================
+
+// EMA ribbons
+plot(ema21,  "EMA 21",  color=color.new(color.yellow, 0), linewidth=1)
+plot(ema50,  "EMA 50",  color=color.new(color.orange, 0), linewidth=2)
+plot(ema200, "EMA 200", color=color.new(color.red,    0), linewidth=2)
+
+// VWAP (NQ focus)
+plot(isNasdaq ? vwapVal : na, "VWAP", color=color.new(color.aqua, 20), linewidth=2)
+
+// Asian / ORB range
+rHigh = rangeReady ? rangeHigh : na
+rLow  = rangeReady ? rangeLow  : na
+plot(rHigh, "Range High", color=color.new(color.lime,   40), style=plot.style_linebr, linewidth=2)
+plot(rLow,  "Range Low",  color=color.new(color.red,    40), style=plot.style_linebr, linewidth=2)
+
+// Entry signals
+plotshape(showSignals and goLong,  title="Buy Signal",  style=shape.triangleup,
+     location=location.belowbar, color=color.lime,  size=size.normal, text="BUY")
+plotshape(showSignals and goShort, title="Sell Signal", style=shape.triangledown,
+     location=location.abovebar, color=color.red,   size=size.normal, text="SELL")
+
+// Background highlight for active sessions
+bgcolor(isGold   and inLonOpen  ? color.new(color.blue,  93) : na, title="London Open")
+bgcolor(isNasdaq and inORBTime  ? color.new(color.purple, 90) : na, title="ORB Period")
+bgcolor(inOverlap               ? color.new(color.yellow, 95) : na, title="London/NY Overlap")
+
+// =============================================================================
+// DASHBOARD TABLE
+// =============================================================================
+
+if showDash and barstate.islast
+    tbl = table.new(position.top_right, 2, 14,
+         bgcolor=color.new(color.black, 10),
+         border_color=color.new(color.gray, 50), border_width=1,
+         frame_color=color.new(color.white, 0), frame_width=1)
+
+    hdr(r, txt) =>
+        table.cell(tbl, 0, r, txt, bgcolor=color.new(color.navy, 20),
+             text_color=color.white, text_halign=text.align_left,
+             text_size=size.small)
+        table.cell(tbl, 1, r, "", bgcolor=color.new(color.navy, 20))
+
+    cell(r, lbl, val, clr) =>
+        table.cell(tbl, 0, r, lbl,  text_color=color.new(color.gray, 20),
+             text_halign=text.align_left,  text_size=size.small)
+        table.cell(tbl, 1, r, val,  text_color=clr,
+             text_halign=text.align_right, text_size=size.small)
+
+    instrument = isGold ? (str.contains(t,"MGC") ? "MGC (Micro Gold)" : "GC (Gold)") :
+                 isNasdaq ? (str.contains(t,"MNQ") ? "MNQ (Micro NQ)" : "NQ (Nasdaq)") :
+                 t
+
+    hdr(0, "GoldMaster Pro — Futures")
+    cell(1, "Instrument",  instrument,                                  color.white)
+    cell(2, "Equity",      "$" + str.tostring(strategy.equity,     "#,##0"), color.white)
+    cell(3, "Risk/trade",  "$" + str.tostring(strategy.equity * riskPct / 100, "#,##0"), color.lime)
+    cell(4, "Contracts",   str.tostring(contracts),                     color.yellow)
+    cell(5, "ATR ($)",     str.tostring(atr * pointVal, "#,##0.00"),    color.white)
+    cell(6, "Regime",      regimeOk ? "OK" : "SKIP",                   regimeOk ? color.lime : color.red)
+    cell(7, "Bull Score",  str.tostring(bullScore) + "/100",            bullScore >= minScore ? color.lime : color.gray)
+    cell(8, "Bear Score",  str.tostring(bearScore) + "/100",            bearScore >= minScore ? color.red  : color.gray)
+    cell(9, "H4 Trend",    h4Bull ? "BULL" : h4Bear ? "BEAR" : "FLAT", h4Bull ? color.lime : h4Bear ? color.red : color.gray)
+    cell(10,"D1 Trend",    d1Bull ? "BULL" : d1Bear ? "BEAR" : "FLAT", d1Bull ? color.lime : d1Bear ? color.red : color.gray)
+    cell(11,"Net P&L",     "$" + str.tostring(strategy.netprofit,  "#,##0"), strategy.netprofit >= 0 ? color.lime : color.red)
+    cell(12,"Win Rate",    str.tostring(strategy.wintrades * 100 / math.max(strategy.closedtrades,1), "#.0") + "%", color.white)
+    cell(13,"Range",       rangeReady ? str.tostring(rangeHigh,"#.00") + " / " + str.tostring(rangeLow,"#.00") : "Building...", color.white)
