@@ -1,12 +1,14 @@
 //+------------------------------------------------------------------+
-//|  GoldMaster Pro EA — MT4 Expert Advisor v2.1 (Fixed)             |
+//|  GoldMaster Pro EA — MT4 Expert Advisor v2.2                     |
 //|  XAUUSD Gold Trading System | Prop Firm Edition                  |
 //|  Fixes: removed MQL5 OnTradeTransaction, removed VWAP iCustom,  |
-//|         corrected XAUUSD tick-based position sizing              |
+//|         corrected XAUUSD tick-based sizing, restored stdlib.mqh  |
 //+------------------------------------------------------------------+
 #property copyright "GoldMaster Pro"
-#property version   "2.10"
+#property version   "2.20"
 #property strict
+
+#include <stdlib.mqh>   // Required for ErrorDescription()
 
 // ─────────────────────────────────────────────
 // INPUT PARAMETERS
