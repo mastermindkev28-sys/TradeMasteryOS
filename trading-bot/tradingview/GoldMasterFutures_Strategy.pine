@@ -1,107 +1,187 @@
 //@version=5
 // =============================================================================
 // GoldMaster Pro — Futures Strategy (GC / MGC / NQ / MNQ)
-// TradingView + Tradovate Integration
+// TradingView + Tradovate | Prop Firm Edition
 //
-// HOW TO USE WITH TRADOVATE:
-//   1. Add this script to your chart (XAUUSD, GC1!, MGC1!, NQ1!, or MNQ1!)
-//   2. In TradingView: Chart -> Trading Panel -> Connect Tradovate account
-//   3. In the Strategy Properties panel, set your account and contract size
-//   4. Enable "Auto-Trading" in the Trading Panel — orders fire automatically
-//   5. The strategy shows live P&L in the Strategy Tester below the chart
+// SUPPORTED PROP FIRMS (rules hard-coded, auto-enforced):
+//   TopStep Combine  — $1K DLL hard, $2K trailing DD intraday, EOD 3:05 PM CT
+//   TopStep XFA      — $2K DLL hard, $2K trailing DD EOD-only, EOD 3:05 PM CT
+//   Lucid Pro        — $1.2K DLL soft, $2K trailing DD EOD-only, EOD 4:40 PM ET
+//   Lucid Flex       — No DLL, $2K trailing DD EOD-only, 50% consistency, 4:40 PM ET
+//   Custom           — Set your own limits
 //
-// SUPPORTED INSTRUMENTS (auto-detected):
-//   GC1! / MGC1!  — Gold futures / Micro Gold futures
-//   NQ1! / MNQ1!  — Nasdaq-100 futures / Micro Nasdaq-100 futures
-//   XAUUSD        — Spot gold (treated as GC)
+// HOW TO CONNECT TO TRADOVATE:
+//   1. Add script to XAUUSD / GC1! / MGC1! / NQ1! / MNQ1! on M15
+//   2. TradingView bottom panel → Trading Panel → Connect Tradovate
+//   3. Enable Auto-Trading toggle — orders execute automatically
+//   4. The prop firm dashboard tracks your progress in real time
 //
-// CONTRACT SPECS:
-//   GC  : $100/oz,  tick $0.10 = $10/tick,  1 contract ~$15K margin
-//   MGC : $10/oz,   tick $0.10 = $1/tick,   1 contract ~$1.5K margin
-//   NQ  : $20/pt,   tick 0.25  = $5/tick,   1 contract ~$21K margin
-//   MNQ : $2/pt,    tick 0.25  = $0.50/tick, 1 contract ~$2.1K margin
-//
-// TRADE LOGIC:
-//   Entry  : Composite score >= 70/100 across 3-TF alignment, ADX, MACD,
-//            RSI, volume, candle quality
-//   Exit   : Breakeven at 1R -> Chandelier trail activates at 2R (2.5xATR)
-//            No fixed TP — trades run until the trend reverses
+// TRADE EXIT: No fixed TP. Breakeven at 1R → wide Chandelier trail at 2R.
+//   Trades close only when the trend reverses. Unlimited upside per trade.
 // =============================================================================
 
 strategy(
-     title                  = "GoldMaster Pro — Futures (GC/MGC/NQ/MNQ)",
-     shorttitle             = "GMP-Futures",
-     overlay                = true,
-     pyramiding             = 0,
-     initial_capital        = 50000,
-     default_qty_type       = strategy.fixed,
-     default_qty_value      = 1,
-     commission_type        = strategy.commission.cash_per_contract,
-     commission_value       = 2.50,
-     slippage               = 1,
-     calc_on_every_tick     = true,
+     title                   = "GoldMaster Pro — Futures + Prop Firm (GC/MGC/NQ/MNQ)",
+     shorttitle              = "GMP-PropFirm",
+     overlay                 = true,
+     pyramiding              = 0,
+     initial_capital         = 50000,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     commission_type         = strategy.commission.cash_per_contract,
+     commission_value        = 2.50,
+     slippage                = 1,
+     calc_on_every_tick      = true,
      process_orders_on_close = false,
-     use_bar_magnifier      = true)
+     use_bar_magnifier       = true)
 
 // =============================================================================
-// INPUTS
+// ─── PROP FIRM SETTINGS ───────────────────────────────────────────────────────
 // =============================================================================
 
-// --- Risk & Compounding
-riskPct        = input.float(1.0,  "Risk % per trade",         group="Risk & Compounding", minval=0.1, maxval=5.0, step=0.1, tooltip="% of account equity risked per trade. Auto-compounds as account grows.")
-maxDailyLoss   = input.float(3.0,  "Max daily loss %",         group="Risk & Compounding", minval=0.5, maxval=10.0)
-maxTotalDD     = input.float(6.0,  "Max total drawdown %",     group="Risk & Compounding", minval=1.0, maxval=15.0)
-maxDailyTrades = input.int  (3,    "Max trades per day",       group="Risk & Compounding", minval=1,   maxval=10)
+pfMode      = input.bool  (true,          "Enable Prop Firm Mode",   group="★ Prop Firm Rules")
+pfProfile   = input.string("TopStep Combine", "Firm & Phase",
+               options=["TopStep Combine","TopStep XFA","Lucid Pro","Lucid Flex","Custom"],
+               group="★ Prop Firm Rules",
+               tooltip="Selects exact rules for that firm. Limits auto-populate below. For Custom, set manually.")
+pfAcctSize  = input.float (50000,         "Account Size ($)",
+               options=[50000.0, 100000.0, 150000.0, 200000.0],
+               group="★ Prop Firm Rules")
 
-// --- Trade Management (Let Winners Run)
+// Custom overrides (used when profile = Custom, or to fine-tune)
+pfDLL_USD    = input.float(1000,  "Daily Loss Limit ($) — override for Custom", group="★ Prop Firm Rules", minval=0)
+pfDD_USD     = input.float(2000,  "Max Drawdown ($)     — override for Custom", group="★ Prop Firm Rules", minval=0)
+pfTarget_USD = input.float(3000,  "Profit Target ($)    — override for Custom", group="★ Prop Firm Rules", minval=0)
+pfDDIntraday = input.bool (true,  "Trailing DD tracks intraday peak (TopStep Combine) — override", group="★ Prop Firm Rules",
+               tooltip="TopStep Combine = true (intraday trailing, strictest). TopStep XFA + Lucid = false (EOD trailing only, much safer).")
+pfDLLHard    = input.bool (true,  "DLL is HARD (liquidate) vs SOFT (halt only) — override", group="★ Prop Firm Rules",
+               tooltip="TopStep = hard liquidate. Lucid = soft halt (existing positions stay open).")
+pfConsRule   = input.bool (true,  "Consistency rule: best day ≤ 50% of profit target — override", group="★ Prop Firm Rules",
+               tooltip="TopStep = active. Lucid Pro eval = none. Lucid funded / Flex = 40-50%.")
+pfMaxContr   = input.int  (5,     "Max contracts (full-size) — override",       group="★ Prop Firm Rules", minval=1)
+pfMaxMicro   = input.int  (50,    "Max micro contracts — override",             group="★ Prop Firm Rules", minval=1)
+
+// EOD close time overrides (minutes before broker auto-liquidation)
+pfEODfirm    = input.string("TopStep (3:05 PM CT)", "EOD Close Time",
+               options=["TopStep (3:05 PM CT)","Lucid (4:40 PM ET)","Custom"],
+               group="★ Prop Firm Rules")
+pfEODcustH   = input.int(15, "Custom EOD hour (broker TZ)",  group="★ Prop Firm Rules", minval=0, maxval=23)
+pfEODcustM   = input.int(5,  "Custom EOD minute",            group="★ Prop Firm Rules", minval=0, maxval=59)
+
+// =============================================================================
+// ─── RISK & COMPOUNDING ───────────────────────────────────────────────────────
+// =============================================================================
+
+riskPct        = input.float(1.0,  "Risk % per trade",           group="Risk & Compounding", minval=0.1, maxval=5.0, step=0.1)
+maxDailyLoss   = input.float(3.0,  "Max daily loss % (EA guard)", group="Risk & Compounding", minval=0.5, maxval=10.0,
+                 tooltip="Secondary EA-level guard independent of prop firm DLL. Set equal to or below the DLL.")
+maxTotalDD     = input.float(6.0,  "Max total DD % (EA guard)",   group="Risk & Compounding", minval=1.0, maxval=15.0)
+maxDailyTrades = input.int  (3,    "Max trades per day",          group="Risk & Compounding", minval=1, maxval=10)
+
+// =============================================================================
+// ─── TRADE MANAGEMENT ─────────────────────────────────────────────────────────
+// =============================================================================
+
 slATR          = input.float(1.2,  "Stop loss (ATR multiplier)",    group="Trade Management", minval=0.5, maxval=4.0, step=0.1)
-beR            = input.float(1.0,  "Breakeven at (R multiple)",     group="Trade Management", minval=0.5, maxval=3.0, step=0.1, tooltip="Move SL to entry when this many R in profit. Protects capital without capping upside.")
-trailActivateR = input.float(2.0,  "Trail activates at (R)",        group="Trade Management", minval=1.0, maxval=5.0, step=0.1, tooltip="Chandelier trail starts tracking when price is this many R in profit.")
-trailATRMult   = input.float(2.5,  "Trail width (ATR multiplier)",  group="Trade Management", minval=1.0, maxval=5.0, step=0.1, tooltip="SL = price - (ATR x this). Wider = more room to run, fewer early exits.")
+beR            = input.float(1.0,  "Breakeven at (R multiple)",     group="Trade Management", minval=0.5, maxval=3.0, step=0.1)
+trailActivateR = input.float(2.0,  "Trail activates at (R)",        group="Trade Management", minval=1.0, maxval=5.0, step=0.1)
+trailATRMult   = input.float(2.5,  "Trail width (ATR multiplier)",  group="Trade Management", minval=1.0, maxval=5.0, step=0.1)
 
-// --- Regime Filters
+// =============================================================================
+// ─── REGIME FILTERS ───────────────────────────────────────────────────────────
+// =============================================================================
+
 atrPeriod      = input.int  (14,   "ATR period",               group="Regime Filters")
 adxPeriod      = input.int  (14,   "ADX period",               group="Regime Filters")
-adxMin         = input.int  (22,   "Minimum ADX (trend req.)", group="Regime Filters", minval=10, maxval=50)
-minScore       = input.int  (70,   "Minimum signal score",     group="Regime Filters", minval=40, maxval=95, tooltip="Score 0-100. Higher = fewer but higher quality trades.")
-minATRpct      = input.float(0.05, "Min ATR as % of price",   group="Regime Filters", minval=0.01, maxval=1.0, step=0.01, tooltip="Skips dead/illiquid sessions.")
-maxATRpct      = input.float(1.5,  "Max ATR as % of price",   group="Regime Filters", minval=0.1, maxval=5.0, step=0.1, tooltip="Skips extreme news spikes.")
-
-// --- Strategies
-useRangeBO     = input.bool(true,  "Range Breakout (Asian/ORB)",    group="Strategies", tooltip="Gold: Asian range 01:00-07:00 UTC. NQ: Opening range 9:30-10:00 ET.")
-useEMAPull     = input.bool(true,  "H4 EMA Trend Pullback",         group="Strategies", tooltip="Highest win rate. Waits for H4 trend then pullback to EMA21-50 zone.")
-useNYMom       = input.bool(true,  "NY / RTH Momentum",             group="Strategies", tooltip="Continuation at NY/RTH open with volume confirmation.")
-useStructBnc   = input.bool(true,  "EMA50 Structure Bounce",        group="Strategies", tooltip="Bounce off H4 EMA50 (institutional level). Requires rejection candle.")
-
-// --- Instrument override (auto-detected by default)
-forceGold      = input.bool(false, "Force Gold strategies",      group="Instrument Override")
-forceNasdaq    = input.bool(false, "Force Nasdaq strategies",    group="Instrument Override")
-
-// --- Display
-showDash       = input.bool(true,  "Show dashboard table",      group="Display")
-showSignals    = input.bool(true,  "Show entry signals on chart",group="Display")
+adxMin         = input.int  (22,   "Minimum ADX",              group="Regime Filters", minval=10, maxval=50)
+minScore       = input.int  (70,   "Minimum signal score",     group="Regime Filters", minval=40, maxval=95)
+minATRpct      = input.float(0.05, "Min ATR % of price",       group="Regime Filters", minval=0.01, maxval=1.0, step=0.01)
+maxATRpct      = input.float(1.5,  "Max ATR % of price",       group="Regime Filters", minval=0.1,  maxval=5.0, step=0.1)
 
 // =============================================================================
-// INSTRUMENT DETECTION & CONTRACT SPECS
+// ─── STRATEGIES ───────────────────────────────────────────────────────────────
 // =============================================================================
 
-t = syminfo.ticker
-isGold_auto   = str.contains(t, "GC") or str.contains(t, "XAU") or str.contains(t, "GOLD")
-isNasdaq_auto = str.contains(t, "NQ")
-isGold   = forceGold   ? true : (forceNasdaq ? false : isGold_auto)
-isNasdaq = forceNasdaq ? true : (forceGold   ? false : isNasdaq_auto)
+useRangeBO     = input.bool(true,  "Range Breakout (Asian/ORB)",   group="Strategies")
+useEMAPull     = input.bool(true,  "H4 EMA Trend Pullback",        group="Strategies")
+useNYMom       = input.bool(true,  "NY / RTH Momentum",            group="Strategies")
+useStructBnc   = input.bool(true,  "EMA50 Structure Bounce",       group="Strategies")
 
-// Contract point value (used for position sizing)
-// Falls back to syminfo.pointvalue if neither detected
-contractPV = isGold ? (str.contains(t, "MGC") ? 10.0 : 100.0) :
-             isNasdaq ? (str.contains(t, "MNQ") ? 2.0 : 20.0) :
+// =============================================================================
+// ─── DISPLAY ──────────────────────────────────────────────────────────────────
+// =============================================================================
+
+forceGold      = input.bool(false, "Force Gold strategies",       group="Display")
+forceNasdaq    = input.bool(false, "Force Nasdaq strategies",     group="Display")
+showDash       = input.bool(true,  "Show prop firm dashboard",    group="Display")
+showSignals    = input.bool(true,  "Show entry signals on chart", group="Display")
+
+// =============================================================================
+// ─── PROP FIRM RULE RESOLVER ─────────────────────────────────────────────────
+// =============================================================================
+// Auto-populate limits based on selected profile + account size.
+// All dollar amounts scale with pfAcctSize.
+
+pfIsTopStep = str.contains(pfProfile, "TopStep")
+pfIsLucid   = str.contains(pfProfile, "Lucid")
+pfIsCustom  = pfProfile == "Custom"
+
+// Limit computation per profile (dollar amounts)
+// TopStep: 2% DLL, trailing DD = $2K(50K)/$3K(100K), target = 6%
+// Lucid:   ~2.4% DLL, trailing DD = $2K(50K)/$3K(100K), target = 6%
+resolvedDLL = pfIsCustom ? pfDLL_USD :
+              pfIsTopStep ? pfAcctSize * 0.02 :
+              pfIsLucid   ? math.round(pfAcctSize * 0.024) :
+              pfDLL_USD
+
+resolvedDD  = pfIsCustom ? pfDD_USD  :
+              pfAcctSize == 50000  ? 2000.0 :
+              pfAcctSize == 100000 ? 3000.0 :
+              pfAcctSize == 150000 ? 4500.0 :
+              pfAcctSize == 200000 ? 6000.0 : pfDD_USD
+
+resolvedTarget = pfIsCustom ? pfTarget_USD : pfAcctSize * 0.06
+
+// Drawdown tracking style
+// TopStep Combine = intraday peak. TopStep XFA + Lucid = EOD peak.
+resolvedDDIntraday = pfIsCustom ? pfDDIntraday : pfProfile == "TopStep Combine"
+
+// DLL hard vs soft
+// TopStep = hard (liquidate immediately). Lucid = soft (halt only).
+resolvedDLLHard = pfIsCustom ? pfDLLHard : pfIsTopStep
+
+// Consistency rule
+// TopStep = 50% rule. Lucid Pro eval = none. Lucid Flex / funded = 40-50%.
+resolvedConsRule = pfIsCustom ? pfConsRule : pfIsTopStep or pfProfile == "Lucid Flex"
+
+// Max contracts
+resolvedMaxContr = pfIsCustom ? pfMaxContr :
+                   pfAcctSize == 50000  ? 5  :
+                   pfAcctSize == 100000 ? 10 :
+                   pfAcctSize == 150000 ? 15 :
+                   pfAcctSize == 200000 ? 20 : pfMaxContr
+
+resolvedMaxMicro = pfIsCustom ? pfMaxMicro : resolvedMaxContr * 10
+
+// =============================================================================
+// ─── INSTRUMENT DETECTION ────────────────────────────────────────────────────
+// =============================================================================
+
+t        = syminfo.ticker
+isMGC    = str.contains(t, "MGC")
+isMNQ    = str.contains(t, "MNQ")
+isGold   = forceGold   ? true  : (forceNasdaq ? false : (str.contains(t,"GC") or str.contains(t,"XAU") or str.contains(t,"GOLD")))
+isNasdaq = forceNasdaq ? true  : (forceGold   ? false : str.contains(t,"NQ"))
+isMicro  = isMGC or isMNQ
+
+contractPV = isGold   ? (isMGC ? 10.0 : 100.0) :
+             isNasdaq ? (isMNQ ?  2.0 :  20.0)  :
              syminfo.pointvalue
 
 // =============================================================================
-// INDICATORS (MULTI-TIMEFRAME)
+// ─── INDICATORS ───────────────────────────────────────────────────────────────
 // =============================================================================
 
-// M15 (current chart timeframe assumed M15)
 ema9   = ta.ema(close, 9)
 ema21  = ta.ema(close, 21)
 ema50  = ta.ema(close, 50)
@@ -109,147 +189,248 @@ ema200 = ta.ema(close, 200)
 rsi14  = ta.rsi(close, 14)
 atr    = ta.atr(atrPeriod)
 [macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
-[diPlus, diMinus, adxVal]  = ta.dmi(adxPeriod, adxPeriod)
+[diPlus, diMinus, adxVal] = ta.dmi(adxPeriod, adxPeriod)
 
-// Volume ratio (current vs 20-bar avg)
 volAvg   = ta.sma(volume, 20)
 volRatio = volAvg > 0 ? volume / volAvg : 1.0
 
-// H1 timeframe
-h1_ema21  = request.security(syminfo.tickerid, "60",  ta.ema(close, 21), lookahead=barmerge.lookahead_off)
-h1_ema50  = request.security(syminfo.tickerid, "60",  ta.ema(close, 50), lookahead=barmerge.lookahead_off)
-h1_rsi    = request.security(syminfo.tickerid, "60",  ta.rsi(close, 14),  lookahead=barmerge.lookahead_off)
-h1_macd   = request.security(syminfo.tickerid, "60",  ta.macd(close,12,26,9).macd,   lookahead=barmerge.lookahead_off)
-h1_signal = request.security(syminfo.tickerid, "60",  ta.macd(close,12,26,9).signal, lookahead=barmerge.lookahead_off)
+h1_ema21  = request.security(syminfo.tickerid,"60", ta.ema(close,21),    lookahead=barmerge.lookahead_off)
+h1_ema50  = request.security(syminfo.tickerid,"60", ta.ema(close,50),    lookahead=barmerge.lookahead_off)
+h1_rsi    = request.security(syminfo.tickerid,"60", ta.rsi(close,14),    lookahead=barmerge.lookahead_off)
+h1_macd   = request.security(syminfo.tickerid,"60", ta.macd(close,12,26,9).macd,   lookahead=barmerge.lookahead_off)
+h1_signal = request.security(syminfo.tickerid,"60", ta.macd(close,12,26,9).signal, lookahead=barmerge.lookahead_off)
 
-// H4 timeframe
-h4_ema21  = request.security(syminfo.tickerid, "240", ta.ema(close, 21),  lookahead=barmerge.lookahead_off)
-h4_ema50  = request.security(syminfo.tickerid, "240", ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
-h4_ema200 = request.security(syminfo.tickerid, "240", ta.ema(close, 200), lookahead=barmerge.lookahead_off)
-h4_adx    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).adx,  lookahead=barmerge.lookahead_off)
-h4_diP    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).plus,  lookahead=barmerge.lookahead_off)
-h4_diM    = request.security(syminfo.tickerid, "240", ta.dmi(14,14).minus, lookahead=barmerge.lookahead_off)
+h4_ema21  = request.security(syminfo.tickerid,"240",ta.ema(close,21),    lookahead=barmerge.lookahead_off)
+h4_ema50  = request.security(syminfo.tickerid,"240",ta.ema(close,50),    lookahead=barmerge.lookahead_off)
+h4_ema200 = request.security(syminfo.tickerid,"240",ta.ema(close,200),   lookahead=barmerge.lookahead_off)
+h4_adx    = request.security(syminfo.tickerid,"240",ta.dmi(14,14).adx,   lookahead=barmerge.lookahead_off)
+h4_diP    = request.security(syminfo.tickerid,"240",ta.dmi(14,14).plus,  lookahead=barmerge.lookahead_off)
+h4_diM    = request.security(syminfo.tickerid,"240",ta.dmi(14,14).minus, lookahead=barmerge.lookahead_off)
 
-// D1 timeframe
-d1_ema50  = request.security(syminfo.tickerid, "D",   ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
-d1_ema200 = request.security(syminfo.tickerid, "D",   ta.ema(close, 200), lookahead=barmerge.lookahead_off)
-d1_close  = request.security(syminfo.tickerid, "D",   close,              lookahead=barmerge.lookahead_off)
+d1_ema50  = request.security(syminfo.tickerid,"D",  ta.ema(close,50),    lookahead=barmerge.lookahead_off)
+d1_ema200 = request.security(syminfo.tickerid,"D",  ta.ema(close,200),   lookahead=barmerge.lookahead_off)
+d1_close  = request.security(syminfo.tickerid,"D",  close,               lookahead=barmerge.lookahead_off)
 
-// VWAP (key for NQ institutional levels)
-vwapVal = ta.vwap(hlc3)
+vwapVal   = ta.vwap(hlc3)
 
 // =============================================================================
-// SESSION & TIME DETECTION
+// ─── SESSION / TIME ───────────────────────────────────────────────────────────
 // =============================================================================
 
-etHour   = hour(time, "America/New_York")
-etMin    = minute(time, "America/New_York")
-etTOD    = etHour * 100 + etMin
+etHour  = hour(time,   "America/New_York")
+etMin   = minute(time, "America/New_York")
+etTOD   = etHour * 100 + etMin
+ctHour  = hour(time,   "America/Chicago")
+ctMin   = minute(time, "America/Chicago")
+ctTOD   = ctHour * 100 + ctMin
+utcHour = hour(time,   "UTC")
 
-utcHour  = hour(time, "UTC")
+inAsian   = utcHour >= 1  and utcHour < 7
+inLondon  = utcHour >= 7  and utcHour < 16
+inLonOpen = utcHour >= 7  and utcHour < 10
+inNY_UTC  = utcHour >= 13 and utcHour < 21
+inNYOpen  = utcHour >= 13 and utcHour < 15
+inOverlap = utcHour >= 13 and utcHour < 16
 
-// Gold sessions (UTC)
-inAsian    = utcHour >= 1  and utcHour < 7    // Asian range building
-inLondon   = utcHour >= 7  and utcHour < 16   // London session
-inLonOpen  = utcHour >= 7  and utcHour < 10   // London open (3 hrs)
-inNY_UTC   = utcHour >= 13 and utcHour < 21   // NY session
-inNYOpen   = utcHour >= 13 and utcHour < 15   // NY open (2 hrs)
-inOverlap  = utcHour >= 13 and utcHour < 16   // London/NY overlap — best quality
-
-// NQ/Nasdaq sessions (ET)
-inRTH      = etTOD >= 930  and etTOD < 1600   // Regular trading hours
-inORBTime  = etTOD >= 930  and etTOD < 1000   // Opening range 9:30-10:00
-isPostORB  = etTOD >= 1000 and etTOD < 1600   // After ORB, ready to trade
-inRTHMorn  = etTOD >= 930  and etTOD < 1200   // Morning session
-inRTHAfter = etTOD >= 1300 and etTOD < 1600   // Afternoon session
+inRTH      = etTOD >= 930  and etTOD < 1600
+inORBTime  = etTOD >= 930  and etTOD < 1000
+isPostORB  = etTOD >= 1000 and etTOD < 1600
+inRTHMorn  = etTOD >= 930  and etTOD < 1200
 
 isNewDay   = dayofweek != dayofweek[1]
+isWeekend  = dayofweek == dayofweek.saturday or dayofweek == dayofweek.sunday
 
 // =============================================================================
-// ASIAN / OPENING RANGE TRACKER
+// ─── PROP FIRM STATE TRACKING ────────────────────────────────────────────────
 // =============================================================================
 
-var float rangeHigh = na
-var float rangeLow  = na
+var float pf_dayStartEq   = strategy.initial_capital  // equity at day open
+var float pf_intraDayPeak = strategy.initial_capital  // intraday equity peak (TopStep Combine)
+var float pf_eodPeak      = strategy.initial_capital  // highest EOD close equity (Lucid/XFA)
+var float pf_bestDayPnL   = 0.0                       // best single-day P&L (consistency)
+var float pf_totalPnL     = 0.0                       // running total P&L
+var int   pf_profitDays   = 0                         // number of profitable days
+var int   pf_dayTrades    = 0                         // trades today
+var bool  pf_dllHitToday  = false                     // DLL triggered today
+var bool  pf_ddHit        = false                     // max DD triggered (fatal)
+var bool  pf_targetHit    = false                     // profit target reached
+
+// Track intraday peak every bar
+pf_intraDayPeak := math.max(pf_intraDayPeak, strategy.equity)
+
+// Day rollover
+if isNewDay
+    float dayPnL = strategy.equity - pf_dayStartEq
+    // Count profitable days for TopStep min-2-days rule
+    if dayPnL > 0
+        pf_profitDays += 1
+    // Update best day for consistency rule
+    if dayPnL > pf_bestDayPnL
+        pf_bestDayPnL := dayPnL
+    // Update EOD peak (Lucid/XFA trailing uses this)
+    pf_eodPeak     := math.max(pf_eodPeak, strategy.equity)
+    pf_dayStartEq  := strategy.equity
+    pf_intraDayPeak := strategy.equity
+    pf_dayTrades   := 0
+    pf_dllHitToday := false
+    pf_totalPnL    := strategy.netprofit
+
+// Total P&L (live)
+pf_currentPnL = strategy.netprofit
+
+// Trailing drawdown source depends on profile
+pf_peakRef   = resolvedDDIntraday ? pf_intraDayPeak : pf_eodPeak
+pf_trailDD   = pf_peakRef - strategy.equity   // $ fallen from peak
+pf_ddBuffer  = resolvedDD - pf_trailDD        // $ remaining before limit
+
+// Daily loss
+pf_dayLoss    = pf_dayStartEq - strategy.equity
+pf_dllBuffer  = resolvedDLL - pf_dayLoss
+
+// Consistency — effective target adjusts upward if best day > 50%
+pf_effectiveTarget = resolvedTarget
+if resolvedConsRule and pf_bestDayPnL > resolvedTarget * 0.5
+    pf_effectiveTarget := pf_bestDayPnL * 2.0  // TopStep raises target automatically
+
+// Check if DLL is breached today
+if pfMode and pf_dayLoss >= resolvedDLL and not pf_dllHitToday
+    pf_dllHitToday := true
+    alert("PROP FIRM DLL HIT: daily loss limit reached. Stop trading today.", alert.freq_once_per_bar)
+
+// Check if trailing DD is breached (account-ending event)
+if pfMode and pf_trailDD >= resolvedDD and not pf_ddHit
+    pf_ddHit := true
+    alert("PROP FIRM MAX DRAWDOWN HIT. Account at risk. Close all trades immediately.", alert.freq_once_per_bar)
+    if resolvedDLLHard and strategy.position_size != 0
+        strategy.close_all("MAX DD HIT")
+
+// Check if profit target is reached
+if pfMode and pf_currentPnL >= pf_effectiveTarget and not pf_targetHit
+    pf_targetHit := true
+    alert("PROFIT TARGET REACHED! $" + str.tostring(pf_currentPnL, "#,##0") + ". Consider stopping and requesting payout.", alert.freq_once_per_bar)
+
+// =============================================================================
+// ─── EOD FORCE CLOSE ─────────────────────────────────────────────────────────
+// TopStep: closes at 3:05 PM CT (5 min before 3:10 PM CT auto-liquidation)
+// Lucid:   closes at 4:40 PM ET (5 min before 4:45 PM ET auto-liquidation)
+// =============================================================================
+
+isTopStepEOD = ctTOD >= 1505 and ctTOD < 1510
+isLucidEOD   = etTOD >= 1640 and etTOD < 1645
+isCustomEOD  = hour(time) == pfEODcustH and minute(time) == pfEODcustM
+
+eodTrigger   = pfMode and strategy.position_size != 0 and (
+               (pfEODfirm == "TopStep (3:05 PM CT)"  and isTopStepEOD) or
+               (pfEODfirm == "Lucid (4:40 PM ET)"    and isLucidEOD)  or
+               (pfEODfirm == "Custom"                and isCustomEOD))
+
+if eodTrigger
+    strategy.close_all("EOD — Prop Firm Close")
+
+// No weekend positions
+if isWeekend and strategy.position_size != 0
+    strategy.close_all("Weekend Close")
+
+// =============================================================================
+// ─── PROP FIRM TRADE GATE ────────────────────────────────────────────────────
+// =============================================================================
+
+pfCanTrade = not pfMode or (
+     not pf_ddHit       and   // Max DD not breached
+     not pf_targetHit   and   // Target not yet hit (stop early if you want)
+     not pf_dllHitToday and   // DLL not hit today
+     not isWeekend       and   // No weekend trading
+     pf_dayTrades < maxDailyTrades)
+
+// Scale-down position size as DD buffer shrinks (protect the account)
+// Normal: 100% | Buffer 50-75%: 75% size | Buffer 25-50%: 50% size | <25%: 25% min
+pfSizeMult = not pfMode ? 1.0 :
+             pf_ddBuffer >= resolvedDD * 0.75 ? 1.0  :
+             pf_ddBuffer >= resolvedDD * 0.50 ? 0.75 :
+             pf_ddBuffer >= resolvedDD * 0.25 ? 0.50 : 0.25
+
+// Consistency throttle: if today's P&L is approaching 40% of target, reduce size
+// (avoids accidentally triggering the consistency rule with an oversized win)
+pf_todayPnL     = strategy.equity - pf_dayStartEq
+pf_consLimit    = pf_effectiveTarget * (resolvedConsRule ? 0.45 : 999)
+pfConsistencyOk = pf_todayPnL < pf_consLimit
+
+// =============================================================================
+// ─── RANGE TRACKER (Asian / ORB) ─────────────────────────────────────────────
+// =============================================================================
+
+var float rangeHigh  = na
+var float rangeLow   = na
 var bool  rangeReady = false
 
-// Reset at new trading day
 if isNewDay
     rangeHigh  := na
     rangeLow   := na
     rangeReady := false
 
-// Gold: build Asian range 01:00-07:00 UTC
 if isGold and inAsian
     rangeHigh  := na(rangeHigh) ? high : math.max(rangeHigh, high)
     rangeLow   := na(rangeLow)  ? low  : math.min(rangeLow,  low)
     rangeReady := false
 
-// NQ: build opening range 9:30-10:00 ET
 if isNasdaq and inORBTime
     rangeHigh  := na(rangeHigh) ? high : math.max(rangeHigh, high)
     rangeLow   := na(rangeLow)  ? low  : math.min(rangeLow,  low)
     rangeReady := false
 
-// Mark range as ready once we exit the range-building window
 if isGold   and utcHour >= 7  and not na(rangeHigh) and not rangeReady
     rangeReady := true
-if isNasdaq and etTOD >= 1000 and not na(rangeHigh) and not rangeReady
+if isNasdaq and etTOD  >= 1000 and not na(rangeHigh) and not rangeReady
     rangeReady := true
 
 // =============================================================================
-// TREND FLAGS (3-timeframe alignment)
+// ─── TREND FLAGS ──────────────────────────────────────────────────────────────
 // =============================================================================
 
 d1Bull = d1_ema50 > d1_ema200 and d1_close > d1_ema50
 d1Bear = d1_ema50 < d1_ema200 and d1_close < d1_ema50
-
 h4Bull = h4_ema21 > h4_ema50  and h4_ema50 > h4_ema200
 h4Bear = h4_ema21 < h4_ema50  and h4_ema50 < h4_ema200
 h4DiOk = h4_adx >= adxMin
-
 h1Bull = h1_ema21 > h1_ema50
 h1Bear = h1_ema21 < h1_ema50
-
 mBull  = ema9 > ema21 and ema21 > ema50
 mBear  = ema9 < ema21 and ema21 < ema50
-
-bullTF = (d1Bull ? 1 : 0) + (h4Bull ? 1 : 0) + (h1Bull ? 1 : 0)
-bearTF = (d1Bear ? 1 : 0) + (h4Bear ? 1 : 0) + (h1Bear ? 1 : 0)
+bullTF = (d1Bull?1:0) + (h4Bull?1:0) + (h1Bull?1:0)
+bearTF = (d1Bear?1:0) + (h4Bear?1:0) + (h1Bear?1:0)
 
 // =============================================================================
-// CANDLE QUALITY
+// ─── CANDLE QUALITY ───────────────────────────────────────────────────────────
 // =============================================================================
 
-body     = math.abs(close - open)
+body      = math.abs(close - open)
 candleRng = high - low
-bPct     = candleRng > 0 ? body / candleRng : 0.0
+bPct      = candleRng > 0 ? body / candleRng : 0.0
 upperWick = high - math.max(close, open)
 lowerWick = math.min(close, open) - low
-
-bullBar  = close > open and bPct >= 0.45
-bearBar  = close < open and bPct >= 0.45
-pinUp    = lowerWick >= body * 2.0 and upperWick <= body * 0.5  // hammer
-pinDown  = upperWick >= body * 2.0 and lowerWick <= body * 0.5  // shooting star
-
-// =============================================================================
-// ATR REGIME CHECK
-// =============================================================================
-
-atrPct      = close > 0 ? atr / close * 100 : 0.0
-regimeOk    = atrPct >= minATRpct and atrPct <= maxATRpct
+bullBar   = close > open and bPct >= 0.45
+bearBar   = close < open and bPct >= 0.45
+pinUp     = lowerWick >= body * 2.0 and upperWick <= body * 0.5
+pinDown   = upperWick >= body * 2.0 and lowerWick <= body * 0.5
 
 // =============================================================================
-// COMPOSITE SIGNAL SCORE FUNCTION (0-100)
+// ─── REGIME CHECK ─────────────────────────────────────────────────────────────
+// =============================================================================
+
+atrPct    = close > 0 ? atr / close * 100 : 0.0
+regimeOk  = atrPct >= minATRpct and atrPct <= maxATRpct
+
+// =============================================================================
+// ─── COMPOSITE SCORE FUNCTION (0-100) ─────────────────────────────────────────
 // =============================================================================
 
 scoreSignal(isBull, tf, adxOk, di1, di2, mac, msig, h1rsi, mrsi, vr, hasBar, hasPin, pr, e21v, e50v, e200v, overlap) =>
     s = 0
-    s += tf * 10                                     // 30 pts: TF alignment
-    s += adxOk ? 8 : 0                               // 8 pts: ADX trend strength
-    s += di1 > di2 + 5 ? 7 : 0                       // 7 pts: DI direction
-    s += mac > msig ? 8 : 0                           // 8 pts: MACD aligned
-    s += mac > msig and mac > mac[1] ? 5 : 0          // 5 pts: MACD accelerating
+    s += tf * 10
+    s += adxOk ? 8 : 0
+    s += di1 > di2 + 5 ? 7 : 0
+    s += mac > msig ? 8 : 0
+    s += mac > msig and mac > mac[1] ? 5 : 0
     if isBull
         s += h1rsi >= 45 and h1rsi <= 65 ? 7 : 0
         s += mrsi  >= 42 and mrsi  <= 62 ? 5 : 0
@@ -262,50 +443,38 @@ scoreSignal(isBull, tf, adxOk, di1, di2, mac, msig, h1rsi, mrsi, vr, hasBar, has
         s += pr < e21v  ? 4 : 0
         s += pr < e50v  ? 4 : 0
         s += pr < e200v ? 4 : 0
-    s += vr >= 1.5 ? 8 : (vr >= 1.2 ? 4 : 0)        // 8 pts: volume
-    s += hasPin ? 10 : (hasBar ? 6 : 0)               // 10 pts: pin bar / 6 pts: bull/bear bar
-    s += overlap ? 5 : 0                              // 5 pts: peak session bonus
+    s += vr >= 1.5 ? 8 : (vr >= 1.2 ? 4 : 0)
+    s += hasPin ? 10 : (hasBar ? 6 : 0)
+    s += overlap ? 5 : 0
     math.min(100, s)
 
-// Bull and bear scores
 bullScore = scoreSignal(true,  bullTF, h4DiOk, h4_diP, h4_diM,
-             h1_macd, h1_signal, h1_rsi, rsi14,
-             volRatio, bullBar, pinUp,
-             close, ema21, ema50, ema200, inOverlap)
+             h1_macd, h1_signal, h1_rsi, rsi14, volRatio,
+             bullBar, pinUp, close, ema21, ema50, ema200, inOverlap)
 
 bearScore = scoreSignal(false, bearTF, h4DiOk, h4_diM, h4_diP,
-             -h1_macd, -h1_signal, 100 - h1_rsi, 100 - rsi14,
-             volRatio, bearBar, pinDown,
-             close, ema21, ema50, ema200, inOverlap)
+             -h1_macd, -h1_signal, 100-h1_rsi, 100-rsi14, volRatio,
+             bearBar, pinDown, close, ema21, ema50, ema200, inOverlap)
 
 // =============================================================================
-// SIGNAL GENERATION
+// ─── SIGNALS ──────────────────────────────────────────────────────────────────
 // =============================================================================
 
-// Active session check (per instrument)
-inActiveSession = isGold   ? (inLondon or inNY_UTC) :
-                  isNasdaq ? inRTH : true
+inActiveSession  = isGold ? (inLondon or inNY_UTC) : isNasdaq ? inRTH : true
+inBreakoutWindow = isGold ? inLonOpen : isNasdaq ? (isPostORB and etTOD < 1130) : false
+rangeSize        = not na(rangeHigh) and not na(rangeLow) ? rangeHigh - rangeLow : 0.0
+validRange       = rangeSize >= atr * 0.5 and rangeSize <= atr * 4.0
 
-// ─── STRATEGY 1: RANGE BREAKOUT ─────────────────────────────────────────────
-// Gold: Asian range 01:00-07:00 UTC | NQ: Opening range 9:30-10:00 ET
-// Institutional compression -> explosive directional move at session open
-rangeSize  = not na(rangeHigh) and not na(rangeLow) ? rangeHigh - rangeLow : 0.0
-validRange = rangeSize >= atr * 0.5 and rangeSize <= atr * 4.0
-
-inBreakoutWindow = isGold   ? inLonOpen :
-                   isNasdaq ? isPostORB and etTOD < 1130 : false
-
+// Strategy 1: Range Breakout
 s1Long  = useRangeBO and rangeReady and validRange and inBreakoutWindow and
-          close > rangeHigh and not h4Bear and bullTF >= 2 and
-          volRatio >= 1.3 and bullScore >= minScore - 10 and regimeOk
+          close > rangeHigh and not h4Bear and bullTF >= 2 and volRatio >= 1.3 and
+          bullScore >= minScore - 10 and regimeOk
 
 s1Short = useRangeBO and rangeReady and validRange and inBreakoutWindow and
-          close < rangeLow  and not h4Bull and bearTF >= 2 and
-          volRatio >= 1.3 and bearScore >= minScore - 10 and regimeOk
+          close < rangeLow  and not h4Bull and bearTF >= 2 and volRatio >= 1.3 and
+          bearScore >= minScore - 10 and regimeOk
 
-// ─── STRATEGY 2: H4 EMA TREND PULLBACK ──────────────────────────────────────
-// Highest win rate. H4 trend confirmed, price pulls back to EMA21-50 zone,
-// bounces with candle + MACD confirmation. Works on both gold and NQ.
+// Strategy 2: H4 EMA Trend Pullback
 zoneTopBull = h4_ema21 + atr * 0.4
 zoneBotBull = h4_ema50 - atr * 0.2
 zoneTopBear = h4_ema50 + atr * 0.2
@@ -321,179 +490,185 @@ s2Short = useEMAPull and inActiveSession and h4DiOk and h4Bear and d1Bear and
           (bearBar or pinDown) and rsi14 >= 38 and rsi14 <= 58 and
           h1_macd < h1_signal and bearScore >= minScore and regimeOk
 
-// ─── STRATEGY 3: NY / RTH MOMENTUM ─────────────────────────────────────────
-// Gold: NY open 13:00-15:00 UTC | NQ: RTH morning 9:30-11:30 ET
-// Strong institutional flow continues London/overnight trend
-inMomWindow = isGold ? inNYOpen : (isNasdaq ? inRTHMorn : false)
-
-// NQ: above/below VWAP adds extra confluence
+// Strategy 3: NY / RTH Momentum
 vwapBull = isNasdaq ? close > vwapVal : true
 vwapBear = isNasdaq ? close < vwapVal : true
+inMomWin = isGold ? inNYOpen : isNasdaq ? inRTHMorn : false
 
-s3Long  = useNYMom and inMomWindow and h4Bull and h1Bull and mBull and
+s3Long  = useNYMom and inMomWin and h4Bull and h1Bull and mBull and
           close > ema21 and volRatio >= 1.5 and h4_diP > h4_diM and
           h1_macd > h1_signal and rsi14 >= 50 and rsi14 <= 75 and
           vwapBull and bullScore >= minScore and regimeOk
 
-s3Short = useNYMom and inMomWindow and h4Bear and h1Bear and mBear and
+s3Short = useNYMom and inMomWin and h4Bear and h1Bear and mBear and
           close < ema21 and volRatio >= 1.5 and h4_diM > h4_diP and
           h1_macd < h1_signal and rsi14 >= 25 and rsi14 <= 50 and
           vwapBear and bearScore >= minScore and regimeOk
 
-// ─── STRATEGY 4: H4 EMA50 STRUCTURE BOUNCE ──────────────────────────────────
-// The H4 EMA50 is a major institutional reference on both gold and NQ.
-// Rejection candle at this level in a trend = high-probability continuation.
-distH4E50 = math.abs(close - h4_ema50)
-nearH4E50 = distH4E50 <= atr * 0.6
+// Strategy 4: H4 EMA50 Structure Bounce
+nearH4E50 = math.abs(close - h4_ema50) <= atr * 0.6
 
 s4Long  = useStructBnc and inActiveSession and h4DiOk and nearH4E50 and
-          d1Bull and h4Bull and close > h4_ema50 and
-          (pinUp or bullBar) and rsi14 >= 35 and rsi14 <= 52 and
-          volRatio >= 1.2 and bullScore >= minScore and regimeOk
+          d1Bull and h4Bull and close > h4_ema50 and (pinUp or bullBar) and
+          rsi14 >= 35 and rsi14 <= 52 and volRatio >= 1.2 and bullScore >= minScore and regimeOk
 
 s4Short = useStructBnc and inActiveSession and h4DiOk and nearH4E50 and
-          d1Bear and h4Bear and close < h4_ema50 and
-          (pinDown or bearBar) and rsi14 >= 48 and rsi14 <= 65 and
-          volRatio >= 1.2 and bearScore >= minScore and regimeOk
+          d1Bear and h4Bear and close < h4_ema50 and (pinDown or bearBar) and
+          rsi14 >= 48 and rsi14 <= 65 and volRatio >= 1.2 and bearScore >= minScore and regimeOk
 
-// Combined signals (any strategy fires)
-goLong  = (s1Long  or s2Long  or s3Long  or s4Long)  and strategy.position_size == 0
-goShort = (s1Short or s2Short or s3Short or s4Short) and strategy.position_size == 0
+// Gate by prop firm rules + consistency guard + no open position
+goLong  = (s1Long  or s2Long  or s3Long  or s4Long)  and
+          strategy.position_size == 0 and pfCanTrade and pfConsistencyOk
 
-// Strategy name for labels
+goShort = (s1Short or s2Short or s3Short or s4Short) and
+          strategy.position_size == 0 and pfCanTrade and pfConsistencyOk
+
 sigName = s1Long or s1Short ? "Range BO" :
           s2Long or s2Short ? "EMA Pull" :
           s3Long or s3Short ? "Momentum" : "Strct Bnc"
 
 // =============================================================================
-// POSITION SIZING — RISK-BASED, AUTO-COMPOUNDS
+// ─── POSITION SIZING ──────────────────────────────────────────────────────────
+// Risk-based, auto-compounds, respects prop firm contract limits & DD scaling
 // =============================================================================
 
-// SL distance in price points
-slPoints  = atr * slATR
+slPoints    = atr * slATR
+riskDollars = strategy.equity * riskPct / 100.0 * pfSizeMult
+pointVal    = contractPV > 0 ? contractPV : syminfo.pointvalue
 
-// Risk in dollars
-riskDollars = strategy.equity * riskPct / 100.0
-
-// Dollar value of 1 point move for this contract
-pointVal = contractPV > 0 ? contractPV : syminfo.pointvalue
-
-// Number of contracts (floor to whole contracts)
 rawContracts = slPoints > 0 and pointVal > 0 ? riskDollars / (slPoints * pointVal) : 1.0
-contracts    = math.max(1, math.floor(rawContracts))
+maxAllowed   = isMicro ? resolvedMaxMicro : resolvedMaxContr
+contracts    = math.max(1, math.min(maxAllowed, math.floor(rawContracts)))
 
 // =============================================================================
-// ORDER EXECUTION
+// ─── ORDER EXECUTION ──────────────────────────────────────────────────────────
 // =============================================================================
 
-// Trail in points (for strategy.exit trail_points / trail_offset)
-trailPoints  = atr * trailATRMult
-bePoints     = slPoints * beR          // Breakeven activation distance
-trailActivPt = slPoints * trailActivateR  // Trail activation distance
+slPts       = atr * slATR
+bePoints    = slPts * beR
+trailActPt  = slPts * trailActivateR
+trailWidth  = atr * trailATRMult
 
 if goLong
     strategy.entry("Long", strategy.long, qty=contracts,
-         comment=sigName + " L | Score:" + str.tostring(bullScore))
-    // Breakeven exit (fires when profit >= bePoints, SL moves to entry)
-    strategy.exit("BE-Long", "Long",
-         stop      = close - slPoints,
-         profit    = bePoints,
-         comment   = "BE")
+         comment=sigName + " L | " + str.tostring(bullScore) + "/100")
+    strategy.exit("BE-Long", "Long", stop=close - slPts, profit=bePoints, comment="BE@1R")
 
 if goShort
     strategy.entry("Short", strategy.short, qty=contracts,
-         comment=sigName + " S | Score:" + str.tostring(bearScore))
-    strategy.exit("BE-Short", "Short",
-         stop      = close + slPoints,
-         profit    = bePoints,
-         comment   = "BE")
+         comment=sigName + " S | " + str.tostring(bearScore) + "/100")
+    strategy.exit("BE-Short", "Short", stop=close + slPts, profit=bePoints, comment="BE@1R")
 
-// Chandelier trailing stop — activates once trade is TrailActivateR in profit
-// Re-evaluate each bar; strategy.exit replaces previous exit of same ID
+// Chandelier trail — activates at 2R, wide 2.5xATR, unlimited upside
 if strategy.position_size > 0
-    entryPx  = strategy.position_avg_price
-    profitPt = close - entryPx
-    if profitPt >= trailActivPt
+    entryPx = strategy.position_avg_price
+    if close - entryPx >= trailActPt
         strategy.exit("Trail-Long", "Long",
-             trail_points = trailPoints,
-             trail_offset = trailPoints,
-             comment      = "Trail")
+             trail_points=trailWidth, trail_offset=trailWidth, comment="Trail")
 
 if strategy.position_size < 0
-    entryPx  = strategy.position_avg_price
-    profitPt = entryPx - close
-    if profitPt >= trailActivPt
+    entryPx = strategy.position_avg_price
+    if entryPx - close >= trailActPt
         strategy.exit("Trail-Short", "Short",
-             trail_points = trailPoints,
-             trail_offset = trailPoints,
-             comment      = "Trail")
+             trail_points=trailWidth, trail_offset=trailWidth, comment="Trail")
 
 // =============================================================================
-// CHART VISUALS
+// ─── CHART VISUALS ────────────────────────────────────────────────────────────
 // =============================================================================
 
-// EMA ribbons
 plot(ema21,  "EMA 21",  color=color.new(color.yellow, 0), linewidth=1)
 plot(ema50,  "EMA 50",  color=color.new(color.orange, 0), linewidth=2)
 plot(ema200, "EMA 200", color=color.new(color.red,    0), linewidth=2)
+plot(isNasdaq ? vwapVal : na, "VWAP", color=color.new(color.aqua,20), linewidth=2)
 
-// VWAP (NQ focus)
-plot(isNasdaq ? vwapVal : na, "VWAP", color=color.new(color.aqua, 20), linewidth=2)
-
-// Asian / ORB range
 rHigh = rangeReady ? rangeHigh : na
 rLow  = rangeReady ? rangeLow  : na
-plot(rHigh, "Range High", color=color.new(color.lime,   40), style=plot.style_linebr, linewidth=2)
-plot(rLow,  "Range Low",  color=color.new(color.red,    40), style=plot.style_linebr, linewidth=2)
+plot(rHigh, "Range High", color=color.new(color.lime,40), style=plot.style_linebr, linewidth=2)
+plot(rLow,  "Range Low",  color=color.new(color.red, 40), style=plot.style_linebr, linewidth=2)
 
-// Entry signals
-plotshape(showSignals and goLong,  title="Buy Signal",  style=shape.triangleup,
-     location=location.belowbar, color=color.lime,  size=size.normal, text="BUY")
-plotshape(showSignals and goShort, title="Sell Signal", style=shape.triangledown,
-     location=location.abovebar, color=color.red,   size=size.normal, text="SELL")
+plotshape(showSignals and goLong,  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.normal, text="BUY")
+plotshape(showSignals and goShort, style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.normal, text="SELL")
 
-// Background highlight for active sessions
-bgcolor(isGold   and inLonOpen  ? color.new(color.blue,  93) : na, title="London Open")
-bgcolor(isNasdaq and inORBTime  ? color.new(color.purple, 90) : na, title="ORB Period")
-bgcolor(inOverlap               ? color.new(color.yellow, 95) : na, title="London/NY Overlap")
+bgcolor(isGold   and inLonOpen  ? color.new(color.blue,   93) : na)
+bgcolor(isNasdaq and inORBTime  ? color.new(color.purple, 90) : na)
+bgcolor(inOverlap               ? color.new(color.yellow, 95) : na)
+
+// DLL / DD warning bar color
+bgcolor(pfMode and pf_ddBuffer < resolvedDD * 0.25  ? color.new(color.red,  88) : na)
+bgcolor(pfMode and pf_dllBuffer < resolvedDLL * 0.3 ? color.new(color.orange,90) : na)
 
 // =============================================================================
-// DASHBOARD TABLE
+// ─── PROP FIRM DASHBOARD ─────────────────────────────────────────────────────
 // =============================================================================
 
 if showDash and barstate.islast
-    tbl = table.new(position.top_right, 2, 14,
-         bgcolor=color.new(color.black, 10),
-         border_color=color.new(color.gray, 50), border_width=1,
-         frame_color=color.new(color.white, 0), frame_width=1)
+    tbl = table.new(position.top_right, 2, 22,
+         bgcolor=color.new(color.black,5),
+         border_color=color.new(color.gray,50), border_width=1,
+         frame_color=color.new(color.white,0),  frame_width=2)
 
+    // Header row helper
     hdr(r, txt) =>
-        table.cell(tbl, 0, r, txt, bgcolor=color.new(color.navy, 20),
-             text_color=color.white, text_halign=text.align_left,
-             text_size=size.small)
-        table.cell(tbl, 1, r, "", bgcolor=color.new(color.navy, 20))
+        table.cell(tbl, 0, r, txt,
+             bgcolor=color.new(color.navy,10), text_color=color.white,
+             text_halign=text.align_left, text_size=size.small)
+        table.cell(tbl, 1, r, "",
+             bgcolor=color.new(color.navy,10))
 
-    cell(r, lbl, val, clr) =>
-        table.cell(tbl, 0, r, lbl,  text_color=color.new(color.gray, 20),
-             text_halign=text.align_left,  text_size=size.small)
-        table.cell(tbl, 1, r, val,  text_color=clr,
+    // Data row helper
+    row(r, lbl, val, clr) =>
+        table.cell(tbl, 0, r, lbl,
+             text_color=color.new(color.silver,0),
+             text_halign=text.align_left, text_size=size.small)
+        table.cell(tbl, 1, r, val,
+             text_color=clr,
              text_halign=text.align_right, text_size=size.small)
 
-    instrument = isGold ? (str.contains(t,"MGC") ? "MGC (Micro Gold)" : "GC (Gold)") :
-                 isNasdaq ? (str.contains(t,"MNQ") ? "MNQ (Micro NQ)" : "NQ (Nasdaq)") :
-                 t
+    // Progress bar helper (fills cell with colored blocks)
+    prog(r, lbl, pct, alertPct) =>
+        filled = math.round(pct * 10)
+        bar    = ""
+        for i = 0 to 9
+            bar += i < filled ? "█" : "░"
+        clr = pct >= 1.0 ? color.lime : pct >= alertPct ? color.yellow : color.red
+        row(r, lbl, bar + " " + str.tostring(math.round(pct*100)) + "%", clr)
 
-    hdr(0, "GoldMaster Pro — Futures")
-    cell(1, "Instrument",  instrument,                                  color.white)
-    cell(2, "Equity",      "$" + str.tostring(strategy.equity,     "#,##0"), color.white)
-    cell(3, "Risk/trade",  "$" + str.tostring(strategy.equity * riskPct / 100, "#,##0"), color.lime)
-    cell(4, "Contracts",   str.tostring(contracts),                     color.yellow)
-    cell(5, "ATR ($)",     str.tostring(atr * pointVal, "#,##0.00"),    color.white)
-    cell(6, "Regime",      regimeOk ? "OK" : "SKIP",                   regimeOk ? color.lime : color.red)
-    cell(7, "Bull Score",  str.tostring(bullScore) + "/100",            bullScore >= minScore ? color.lime : color.gray)
-    cell(8, "Bear Score",  str.tostring(bearScore) + "/100",            bearScore >= minScore ? color.red  : color.gray)
-    cell(9, "H4 Trend",    h4Bull ? "BULL" : h4Bear ? "BEAR" : "FLAT", h4Bull ? color.lime : h4Bear ? color.red : color.gray)
-    cell(10,"D1 Trend",    d1Bull ? "BULL" : d1Bear ? "BEAR" : "FLAT", d1Bull ? color.lime : d1Bear ? color.red : color.gray)
-    cell(11,"Net P&L",     "$" + str.tostring(strategy.netprofit,  "#,##0"), strategy.netprofit >= 0 ? color.lime : color.red)
-    cell(12,"Win Rate",    str.tostring(strategy.wintrades * 100 / math.max(strategy.closedtrades,1), "#.0") + "%", color.white)
-    cell(13,"Range",       rangeReady ? str.tostring(rangeHigh,"#.00") + " / " + str.tostring(rangeLow,"#.00") : "Building...", color.white)
+    instrument = isGold ? (isMGC ? "MGC Micro Gold" : "GC Gold") :
+                 isNasdaq ? (isMNQ ? "MNQ Micro NQ" : "NQ Nasdaq") : t
+
+    pfStatus   = pf_ddHit      ? "ACCOUNT STOPPED" :
+                 pf_targetHit  ? "TARGET HIT - STOP" :
+                 pf_dllHitToday ? "DLL HIT - NO TRADES" :
+                 pfCanTrade     ? "ACTIVE" : "SUSPENDED"
+
+    pfStatusClr = pf_ddHit      ? color.red    :
+                  pf_targetHit  ? color.lime   :
+                  pf_dllHitToday ? color.orange :
+                  pfCanTrade     ? color.lime   : color.gray
+
+    targetPct  = pf_currentPnL  / pf_effectiveTarget
+    dllUsedPct = pf_dayLoss     / resolvedDLL
+    ddUsedPct  = pf_trailDD     / resolvedDD
+
+    hdr(0,  "GoldMaster Pro — Prop Firm Mode")
+    row(1,  "Firm / Phase",   pfProfile,                                         color.white)
+    row(2,  "Instrument",     instrument,                                        color.white)
+    row(3,  "Status",         pfStatus,                                          pfStatusClr)
+    hdr(4,  "— Account Metrics —")
+    row(5,  "Balance",        "$" + str.tostring(strategy.equity,   "#,##0"),    color.white)
+    row(6,  "Net P&L",        "$" + str.tostring(pf_currentPnL,    "#,##0"),     pf_currentPnL >= 0 ? color.lime : color.red)
+    row(7,  "Today P&L",      "$" + str.tostring(pf_todayPnL,      "#,##0"),     pf_todayPnL   >= 0 ? color.lime : color.orange)
+    hdr(8,  "— Prop Firm Limits —")
+    prog(9,  "Profit Target",  math.max(0, math.min(1, targetPct)),  0.7)
+    prog(10, "DLL Used",       math.max(0, math.min(1, dllUsedPct)), 0.6)
+    prog(11, "Trail DD Used",  math.max(0, math.min(1, ddUsedPct)),  0.5)
+    row(12, "DLL Remaining",  "$" + str.tostring(math.max(0,pf_dllBuffer), "#,##0"),  pf_dllBuffer > resolvedDLL*0.4 ? color.lime : pf_dllBuffer > resolvedDLL*0.2 ? color.yellow : color.red)
+    row(13, "DD Buffer",      "$" + str.tostring(math.max(0,pf_ddBuffer),  "#,##0"),  pf_ddBuffer  > resolvedDD *0.5 ? color.lime : pf_ddBuffer  > resolvedDD *0.25 ? color.yellow : color.red)
+    hdr(14, "— Consistency & Rules —")
+    row(15, "Best Day",       "$" + str.tostring(pf_bestDayPnL,     "#,##0"),    color.white)
+    row(16, "Eff. Target",    "$" + str.tostring(pf_effectiveTarget, "#,##0"),   color.yellow)
+    row(17, "Profit Days",    str.tostring(pf_profitDays) + " days",             pf_profitDays >= 2 ? color.lime : color.orange)
+    hdr(18, "— Trade Info —")
+    row(19, "Contracts",      str.tostring(contracts) + " (max " + str.tostring(maxAllowed) + ")", color.white)
+    row(20, "Risk/trade",     "$" + str.tostring(strategy.equity*riskPct/100*pfSizeMult,"#,##0"), color.white)
+    row(21, "Win Rate",       str.tostring(strategy.wintrades*100/math.max(strategy.closedtrades,1),"#.0") + "% (" + str.tostring(strategy.closedtrades) + " trades)", color.white)
