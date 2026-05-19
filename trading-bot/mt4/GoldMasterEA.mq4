@@ -1,698 +1,613 @@
 //+------------------------------------------------------------------+
-//|  GoldMaster Pro EA — MT4 Expert Advisor v2.2                     |
-//|  XAUUSD Gold Trading System | Prop Firm Edition                  |
-//|  Fixes: removed MQL5 OnTradeTransaction, removed VWAP iCustom,  |
-//|         corrected XAUUSD tick-based sizing, restored stdlib.mqh  |
+//| GoldMaster Pro EA v3.0                                           |
+//| XAUUSD Gold Trading Bot - Prop Firm Edition                      |
+//| Target: $1000-$1500/week on $100K account                        |
 //+------------------------------------------------------------------+
 #property copyright "GoldMaster Pro"
-#property version   "2.20"
+#property link      ""
+#property version   "3.00"
 #property strict
 
-#include <stdlib.mqh>   // Required for ErrorDescription()
+//--- Risk inputs
+extern double RiskPct         = 0.75;   // Risk per trade (%)
+extern double MaxDailyLossPct = 3.0;    // Max daily loss (%)
+extern double MaxTotalDDPct   = 6.0;    // Max total drawdown (%)
+extern int    MaxDailyTrades  = 3;      // Max trades per day
+extern double MinRR           = 2.0;    // Min risk:reward ratio
+extern bool   PropFirmMode    = true;   // Prop firm safety mode
 
-// ─────────────────────────────────────────────
-// INPUT PARAMETERS
-// ─────────────────────────────────────────────
+//--- Indicator inputs
+extern int    ATR_Period      = 14;
+extern double SL_Mult         = 1.5;    // Stop = ATR * SL_Mult
+extern double TP_Mult         = 3.0;    // TP   = ATR * SL_Mult * MinRR
+extern int    EMA_Fast        = 9;
+extern int    EMA_Mid         = 21;
+extern int    EMA_Slow        = 50;
+extern int    EMA_Trend       = 200;
+extern int    RSI_Period      = 14;
+extern int    ADX_Period      = 14;
+extern int    ADX_Min         = 20;
+extern double VolMult         = 1.3;    // Volume filter multiplier
+extern int    MinScore        = 65;     // Min signal score (0-100)
 
-// Risk Management
-extern double RiskPerTrade_Pct  = 0.75;  // Risk % per trade (0.75% on $100K = $750)
-extern double MaxDailyLoss_Pct  = 3.0;   // Max daily drawdown %
-extern double MaxTotalDD_Pct    = 6.0;   // Max total drawdown %
-extern int    MaxTradesPerDay   = 3;     // Max trades per day
-extern double MinRR             = 2.0;   // Minimum Risk:Reward ratio
-extern bool   PropFirmMode      = true;  // Strict prop firm risk controls
+//--- Strategy switches
+extern bool   UseLondonBO     = true;   // London breakout strategy
+extern bool   UseTrendPull    = true;   // Trend pullback strategy
+extern bool   UseNYMomentum   = true;   // NY momentum strategy
 
-// Stop / Target
-extern int    ATR_Period        = 14;
-extern double SL_ATR_Mult       = 1.5;   // Stop loss = ATR * this
-extern double TP_ATR_Mult       = 3.0;   // Take profit = ATR * this
+//--- London breakout inputs
+extern int    LB_StartHour    = 4;      // Range build start (UTC)
+extern int    LB_EndHour      = 7;      // Range build end / London open (UTC)
+extern double LB_TPMult       = 1.5;    // TP = range * LB_TPMult
 
-// EMA periods
-extern int    EMA_Fast          = 9;
-extern int    EMA_Mid           = 21;
-extern int    EMA_Slow          = 50;
-extern int    EMA_Trend         = 200;
+//--- Session hours UTC
+extern int    London_Open     = 7;
+extern int    London_Close    = 16;
+extern int    NY_Open         = 13;
+extern int    NY_Close        = 20;
 
-// Strategy switches
-extern bool   UseStrategy_LondonBO   = true;
-extern bool   UseStrategy_TrendPull  = true;
-extern bool   UseStrategy_NYMomentum = true;
+//--- Trade management
+extern bool   UseTrail        = true;
+extern double TrailStartR     = 1.0;    // Start trailing after 1R profit
+extern double TrailATRMult    = 1.0;    // Trail distance = ATR * this
+extern bool   UsePartial      = true;
+extern double PartialR        = 1.5;    // Partial close at 1.5R
+extern double PartialPct      = 50.0;   // Close 50% of position
 
-// Filters
-extern int    MinSignalScore    = 65;
-extern int    ADX_Period        = 14;
-extern int    ADX_MinValue      = 20;
-extern int    RSI_Period        = 14;
-extern int    RSI_OB            = 70;
-extern int    RSI_OS            = 30;
-extern double VolFilter_Mult    = 1.3;
+//--- Display
+extern bool   ShowInfo        = true;
 
-// London Breakout
-extern int    LB_RangeStartHour = 4;    // UTC — pre-London range start
-extern int    LB_RangeEndHour   = 7;    // UTC — London open
-extern double LB_TargetMult     = 1.5;  // TP = range * this beyond breakout
-
-// Session hours (UTC)
-extern int    London_Open_UTC   = 7;
-extern int    London_Close_UTC  = 16;
-extern int    NY_Open_UTC       = 13;
-extern int    NY_Close_UTC      = 20;
-
-// Trade management
-extern bool   UseTrailingStop   = true;
-extern double TrailActivate_R   = 1.0;  // Start trailing after X * R profit
-extern double TrailATR_Mult     = 1.0;  // Trail distance = ATR * this
-extern bool   UsePartialClose   = true;
-extern double PartialClose_R    = 1.5;  // Close 50% at 1.5R profit
-extern double PartialClose_Pct  = 50.0;
-
-// Display
-extern bool   ShowDashboard     = true;
-
-// Magic number — identifies this EA's orders
-extern int    MagicNumber       = 20250519;
-
-// ─────────────────────────────────────────────
-// GLOBAL STATE
-// ─────────────────────────────────────────────
-double   AccountStartEquity;
-double   TodayStartEquity;
-int      TodayTradeCount;
-datetime TodayDate;
-bool     TradingSuspended;
-string   SuspendReason;
-
-double   LondonRangeHigh;
-double   LondonRangeLow;
-bool     LondonRangeSet;
-datetime LondonRangeDate;
-
-int      LastSignalBar;
+//--- EA identifier
+extern int    Magic           = 20250519;
 
 //+------------------------------------------------------------------+
-//| INIT                                                              |
+//| Global variables                                                  |
+//+------------------------------------------------------------------+
+double   g_StartEquity;
+double   g_TodayStartEquity;
+int      g_TodayTrades;
+datetime g_TodayDate;
+bool     g_Suspended;
+string   g_SuspendReason;
+
+double   g_RangeHigh;
+double   g_RangeLow;
+bool     g_RangeSet;
+datetime g_RangeDate;
+
+int      g_LastSignalBars;
+
+//+------------------------------------------------------------------+
+//| Expert initialization                                             |
 //+------------------------------------------------------------------+
 int OnInit()
-{
-    AccountStartEquity = AccountEquity();
-    TodayStartEquity   = AccountEquity();
-    TodayTradeCount    = 0;
-    TodayDate          = iTime(NULL, PERIOD_D1, 0);
-    TradingSuspended   = false;
-    SuspendReason      = "";
-    LondonRangeHigh    = 0;
-    LondonRangeLow     = 0;
-    LondonRangeSet     = false;
-    LondonRangeDate    = 0;
-    LastSignalBar      = -1;
+  {
+   g_StartEquity      = AccountEquity();
+   g_TodayStartEquity = AccountEquity();
+   g_TodayTrades      = 0;
+   g_TodayDate        = iTime(NULL, PERIOD_D1, 0);
+   g_Suspended        = false;
+   g_SuspendReason    = "";
+   g_RangeHigh        = 0;
+   g_RangeLow         = 0;
+   g_RangeSet         = false;
+   g_RangeDate        = 0;
+   g_LastSignalBars   = -1;
 
-    // Verify we are on XAUUSD
-    if (StringFind(Symbol(), "XAU") < 0 && StringFind(Symbol(), "GOLD") < 0)
-        Print("WARNING: EA designed for XAUUSD. Current symbol: ", Symbol());
+   Print("GoldMaster Pro v3.0 started. Equity=$", DoubleToStr(AccountEquity(),2));
+   Print("Risk=", RiskPct, "% PropFirm=", PropFirmMode);
 
-    Print("GoldMaster Pro v2.1 started | Equity: $", DoubleToStr(AccountEquity(), 2));
-    Print("Risk per trade: ", RiskPerTrade_Pct, "% = $",
-          DoubleToStr(AccountEquity() * RiskPerTrade_Pct / 100.0, 2));
-    Print("Prop Firm Mode: ", PropFirmMode ? "ON" : "OFF");
-
-    return INIT_SUCCEEDED;
-}
+   return(INIT_SUCCEEDED);
+  }
 
 //+------------------------------------------------------------------+
-//| DEINIT                                                            |
+//| Expert deinitialization                                           |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
-{
-    Comment("");
-    Print("GoldMaster Pro stopped. Reason code: ", reason);
-}
+  {
+   Comment("");
+   Print("GoldMaster stopped. Code=", reason);
+  }
 
 //+------------------------------------------------------------------+
-//| MAIN TICK                                                         |
+//| Expert tick function                                              |
 //+------------------------------------------------------------------+
 void OnTick()
-{
-    // Manage open trades on every tick (trailing stop, partial close)
-    ManageOpenTrades();
+  {
+   ManageTrades();
 
-    // Only run signal logic on new bar
-    static datetime lastBar = 0;
-    datetime curBar = iTime(NULL, 0, 0);
-    if (curBar == lastBar)
-    {
-        if (ShowDashboard) DrawDashboard();
-        return;
-    }
-    lastBar = curBar;
+   static datetime lastBar = 0;
+   datetime curBar = iTime(NULL, 0, 0);
+   if(curBar == lastBar)
+     {
+      if(ShowInfo) ShowDashboard();
+      return;
+     }
+   lastBar = curBar;
 
-    // ── Daily reset ──────────────────────────────────────────────
-    datetime today = iTime(NULL, PERIOD_D1, 0);
-    if (today != TodayDate)
-    {
-        TodayDate        = today;
-        TodayStartEquity = AccountEquity();
-        TodayTradeCount  = 0;
-        TradingSuspended = false;
-        SuspendReason    = "";
-        LondonRangeHigh  = 0;
-        LondonRangeLow   = 0;
-        LondonRangeSet   = false;
-        Print("New day reset | Start equity: $", DoubleToStr(AccountEquity(), 2));
-    }
+   //--- Daily reset
+   datetime today = iTime(NULL, PERIOD_D1, 0);
+   if(today != g_TodayDate)
+     {
+      g_TodayDate        = today;
+      g_TodayStartEquity = AccountEquity();
+      g_TodayTrades      = 0;
+      g_Suspended        = false;
+      g_SuspendReason    = "";
+      g_RangeHigh        = 0;
+      g_RangeLow         = 0;
+      g_RangeSet         = false;
+      Print("Daily reset. Equity=$", DoubleToStr(AccountEquity(),2));
+     }
 
-    // ── Update London pre-market range ───────────────────────────
-    UpdateLondonRange();
+   BuildLondonRange();
+   if(!CanTrade()) return;
+   if(OpenOrderCount() > 0) return;
 
-    // ── Risk guard ───────────────────────────────────────────────
-    if (!CanTrade()) return;
+   int sig = GetSignal();
+   if(sig == 0) return;
 
-    // ── Only one trade open at a time ────────────────────────────
-    if (CountOpenOrders() > 0) return;
-
-    // ── Get signal ───────────────────────────────────────────────
-    int sig = GetSignal();
-    if (sig == 0) return;
-
-    // ── Execute ──────────────────────────────────────────────────
-    ExecuteTrade(sig);
-}
+   PlaceOrder(sig);
+  }
 
 //+------------------------------------------------------------------+
-//| RISK GATE                                                         |
+//| Risk gate                                                         |
 //+------------------------------------------------------------------+
 bool CanTrade()
-{
-    if (TradingSuspended) return false;
+  {
+   if(g_Suspended) return(false);
 
-    // No weekend trading
-    int dow = DayOfWeek();
-    if (dow == 0 || dow == 6) return false;
+   int dow = DayOfWeek();
+   if(dow == 0 || dow == 6) return(false);
 
-    // Session filter — London + NY only
-    int h = TimeHour(TimeGMT());
-    bool inLondon = (h >= London_Open_UTC  && h < London_Close_UTC);
-    bool inNY     = (h >= NY_Open_UTC      && h < NY_Close_UTC);
-    if (!inLondon && !inNY) return false;
+   int h = TimeHour(TimeGMT());
 
-    // Dead zone: 20:00 – 02:00 UTC
-    if (h >= 20 || h < 2) return false;
+   //--- Dead zone 20:00-02:00 UTC
+   if(h >= 20 || h < 2) return(false);
 
-    if (!PropFirmMode) return true;
+   //--- London + NY sessions only
+   bool inLondon = (h >= London_Open && h < London_Close);
+   bool inNY     = (h >= NY_Open     && h < NY_Close);
+   if(!inLondon && !inNY) return(false);
 
-    // Daily loss limit
-    double dailyDD = AccountEquity() - TodayStartEquity;
-    if (dailyDD < -(AccountEquity() * MaxDailyLoss_Pct / 100.0))
-    {
-        TradingSuspended = true;
-        SuspendReason    = StringFormat("Daily loss %.1f%% hit", MaxDailyLoss_Pct);
-        Alert("GoldMaster: Daily loss limit reached — trading suspended.");
-        return false;
-    }
+   if(!PropFirmMode) return(true);
 
-    // Total drawdown
-    double totalDD = (AccountStartEquity > 0)
-                     ? (AccountEquity() - AccountStartEquity) / AccountStartEquity * 100.0
-                     : 0;
-    if (totalDD < -MaxTotalDD_Pct)
-    {
-        TradingSuspended = true;
-        SuspendReason    = StringFormat("Total DD %.1f%% breached", MaxTotalDD_Pct);
-        Alert("GoldMaster: MAX DRAWDOWN BREACHED — all trading suspended.");
-        return false;
-    }
+   //--- Daily loss check
+   double dailyPnL = AccountEquity() - g_TodayStartEquity;
+   if(dailyPnL < -(g_TodayStartEquity * MaxDailyLossPct / 100.0))
+     {
+      g_Suspended     = true;
+      g_SuspendReason = "Daily loss limit hit";
+      Alert("GoldMaster: Daily loss limit reached. Trading suspended.");
+      return(false);
+     }
 
-    // Daily trade cap
-    if (TodayTradeCount >= MaxTradesPerDay) return false;
+   //--- Total drawdown check
+   if(g_StartEquity > 0)
+     {
+      double ddPct = (AccountEquity() - g_StartEquity) / g_StartEquity * 100.0;
+      if(ddPct < -MaxTotalDDPct)
+        {
+         g_Suspended     = true;
+         g_SuspendReason = "Max drawdown breached";
+         Alert("GoldMaster: MAX DRAWDOWN BREACHED. Trading suspended.");
+         return(false);
+        }
+     }
 
-    // Precautionary: pause at 80% of daily limit
-    double dailyDDPct = (TodayStartEquity > 0)
-                        ? (AccountEquity() - TodayStartEquity) / TodayStartEquity * 100.0
-                        : 0;
-    if (dailyDDPct < -(MaxDailyLoss_Pct * 0.8)) return false;
+   //--- Daily trade limit
+   if(g_TodayTrades >= MaxDailyTrades) return(false);
 
-    return true;
-}
+   return(true);
+  }
 
 //+------------------------------------------------------------------+
-//| SIGNAL ENGINE  — returns 1=BUY, -1=SELL, 0=NONE                 |
+//| Signal engine - returns 1=BUY, -1=SELL, 0=none                  |
 //+------------------------------------------------------------------+
 int GetSignal()
-{
-    // One signal per bar maximum
-    if (Bars == LastSignalBar) return 0;
+  {
+   if(Bars == g_LastSignalBars) return(0);
 
-    // ── Read indicators (bar 1 = last closed bar) ────────────────
-    double atr    = iATR(NULL, 0, ATR_Period, 1);
-    double ema9   = iMA(NULL, 0, EMA_Fast,  0, MODE_EMA, PRICE_CLOSE, 1);
-    double ema21  = iMA(NULL, 0, EMA_Mid,   0, MODE_EMA, PRICE_CLOSE, 1);
-    double ema50  = iMA(NULL, 0, EMA_Slow,  0, MODE_EMA, PRICE_CLOSE, 1);
-    double ema200 = iMA(NULL, 0, EMA_Trend, 0, MODE_EMA, PRICE_CLOSE, 1);
-    double rsi    = iRSI(NULL, 0, RSI_Period, PRICE_CLOSE, 1);
-    double adx    = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MAIN,    1);
-    double diPlus = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_PLUSDI,  1);
-    double diMinus= iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MINUSDI, 1);
+   double atr    = iATR(NULL, 0, ATR_Period, 1);
+   double ema9   = iMA(NULL, 0, EMA_Fast,  0, MODE_EMA, PRICE_CLOSE, 1);
+   double ema21  = iMA(NULL, 0, EMA_Mid,   0, MODE_EMA, PRICE_CLOSE, 1);
+   double ema50  = iMA(NULL, 0, EMA_Slow,  0, MODE_EMA, PRICE_CLOSE, 1);
+   double ema200 = iMA(NULL, 0, EMA_Trend, 0, MODE_EMA, PRICE_CLOSE, 1);
 
-    // H4 macro trend
-    double ema200_h4 = iMA(NULL, PERIOD_H4, 200, 0, MODE_EMA, PRICE_CLOSE, 1);
-    double ema50_h4  = iMA(NULL, PERIOD_H4, 50,  0, MODE_EMA, PRICE_CLOSE, 1);
+   double rsi    = iRSI(NULL, 0, RSI_Period, PRICE_CLOSE, 1);
+   double adx    = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MAIN,    1);
+   double diP    = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_PLUSDI,  1);
+   double diM    = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MINUSDI, 1);
 
-    double C1 = iClose(NULL, 0, 1);  // last closed bar close
-    double O1 = iOpen(NULL,  0, 1);
+   //--- H4 macro trend
+   double h4ema200 = iMA(NULL, PERIOD_H4, 200, 0, MODE_EMA, PRICE_CLOSE, 1);
+   double h4ema50  = iMA(NULL, PERIOD_H4,  50, 0, MODE_EMA, PRICE_CLOSE, 1);
 
-    // Volume ratio vs 20-bar average
-    double volSum = 0;
-    for (int k = 1; k <= 20; k++) volSum += (double)iVolume(NULL, 0, k);
-    double volAvg   = volSum / 20.0;
-    double vol1     = (double)iVolume(NULL, 0, 1);
-    double volRatio = (volAvg > 0) ? vol1 / volAvg : 1.0;
+   double C1 = iClose(NULL, 0, 1);
+   double O1 = iOpen(NULL,  0, 1);
 
-    // Momentum
-    double mom12 = C1 - iClose(NULL, 0, 13);
-    double roc5  = (iClose(NULL, 0, 6) > 0)
-                   ? (C1 - iClose(NULL, 0, 6)) / iClose(NULL, 0, 6) * 100.0
-                   : 0;
+   //--- Volume ratio
+   double volSum = 0;
+   int vi;
+   for(vi = 1; vi <= 20; vi++) volSum += (double)iVolume(NULL, 0, vi);
+   double volAvg   = volSum / 20.0;
+   double vol1     = (double)iVolume(NULL, 0, 1);
+   double volRatio = (volAvg > 0) ? vol1 / volAvg : 1.0;
 
-    // Trend flags
-    bool htf_bull   = (C1 > ema200_h4 && ema50_h4 > ema200_h4);
-    bool htf_bear   = (C1 < ema200_h4 && ema50_h4 < ema200_h4);
-    bool micro_bull = (ema9 > ema21 && ema21 > ema50);
-    bool micro_bear = (ema9 < ema21 && ema21 < ema50);
+   //--- Momentum
+   double mom = C1 - iClose(NULL, 0, 13);
+   double roc  = 0;
+   double c6 = iClose(NULL, 0, 6);
+   if(c6 > 0) roc = (C1 - c6) / c6 * 100.0;
 
-    // ── Bull score (max 93) ──────────────────────────────────────
-    int bs = 0;
-    if (htf_bull)                         bs += 15;
-    if (micro_bull)                       bs += 10;
-    if (C1 > ema200)                      bs += 5;
-    if (mom12 > 0)                        bs += 8;
-    if (roc5  > 0)                        bs += 7;
-    if (rsi > 50 && rsi < RSI_OB)        bs += 10;
-    if (volRatio > VolFilter_Mult)        bs += 10;
-    if (volRatio > 2.0)                   bs += 5;
-    if (C1 > O1)                          bs += 8;
-    if (adx > ADX_MinValue)              bs += 8;
-    if (diPlus > diMinus)                bs += 7;
+   //--- Trend flags
+   bool htfBull   = (C1 > h4ema200 && h4ema50 > h4ema200);
+   bool htfBear   = (C1 < h4ema200 && h4ema50 < h4ema200);
+   bool microBull = (ema9 > ema21 && ema21 > ema50);
+   bool microBear = (ema9 < ema21 && ema21 < ema50);
 
-    // ── Bear score (max 93) ──────────────────────────────────────
-    int ss = 0;
-    if (htf_bear)                         ss += 15;
-    if (micro_bear)                       ss += 10;
-    if (C1 < ema200)                      ss += 5;
-    if (mom12 < 0)                        ss += 8;
-    if (roc5  < 0)                        ss += 7;
-    if (rsi < 50 && rsi > RSI_OS)        ss += 10;
-    if (volRatio > VolFilter_Mult)        ss += 10;
-    if (volRatio > 2.0)                   ss += 5;
-    if (C1 < O1)                          ss += 8;
-    if (adx > ADX_MinValue)              ss += 8;
-    if (diMinus > diPlus)                ss += 7;
+   //--- Bull score
+   int bs = 0;
+   if(htfBull)                    bs += 15;
+   if(microBull)                  bs += 10;
+   if(C1 > ema200)                bs += 5;
+   if(mom > 0)                    bs += 8;
+   if(roc > 0)                    bs += 7;
+   if(rsi > 50 && rsi < 70)      bs += 10;
+   if(volRatio > VolMult)         bs += 10;
+   if(volRatio > 2.0)             bs += 5;
+   if(C1 > O1)                   bs += 8;
+   if(adx > ADX_Min)             bs += 8;
+   if(diP > diM)                  bs += 7;
 
-    int h = TimeHour(TimeGMT());
-    bool inLondonOpen = (h >= London_Open_UTC && h < London_Open_UTC + 3);
-    bool inNYOpen     = (h >= NY_Open_UTC     && h < NY_Open_UTC + 2);
+   //--- Bear score
+   int ss = 0;
+   if(htfBear)                    ss += 15;
+   if(microBear)                  ss += 10;
+   if(C1 < ema200)                ss += 5;
+   if(mom < 0)                    ss += 8;
+   if(roc < 0)                    ss += 7;
+   if(rsi < 50 && rsi > 30)      ss += 10;
+   if(volRatio > VolMult)         ss += 10;
+   if(volRatio > 2.0)             ss += 5;
+   if(C1 < O1)                   ss += 8;
+   if(adx > ADX_Min)             ss += 8;
+   if(diM > diP)                  ss += 7;
 
-    // ── Strategy 1: London Session Breakout ──────────────────────
-    if (UseStrategy_LondonBO && LondonRangeSet && inLondonOpen)
-    {
-        if (C1 > LondonRangeHigh && volRatio > VolFilter_Mult && bs >= MinSignalScore - 10)
+   int h = TimeHour(TimeGMT());
+   bool inLondonOpen = (h >= London_Open && h < London_Open + 3);
+   bool inNYOpen     = (h >= NY_Open     && h < NY_Open + 2);
+
+   //--- Strategy 1: London Breakout
+   if(UseLondonBO && g_RangeSet && inLondonOpen)
+     {
+      if(C1 > g_RangeHigh && volRatio > VolMult && bs >= MinScore - 10)
         {
-            LastSignalBar = Bars;
-            return 1;
+         g_LastSignalBars = Bars;
+         return(1);
         }
-        if (C1 < LondonRangeLow && volRatio > VolFilter_Mult && ss >= MinSignalScore - 10)
+      if(C1 < g_RangeLow && volRatio > VolMult && ss >= MinScore - 10)
         {
-            LastSignalBar = Bars;
-            return -1;
+         g_LastSignalBars = Bars;
+         return(-1);
         }
-    }
+     }
 
-    // ── Strategy 2: Trend Pullback (EMA bounce) ──────────────────
-    if (UseStrategy_TrendPull)
-    {
-        bool bullZone = (C1 >= ema21 * 0.9985 && C1 <= ema50 * 1.0020);
-        bool bearZone = (C1 <= ema21 * 1.0015 && C1 >= ema50 * 0.9980);
+   //--- Strategy 2: Trend Pullback
+   if(UseTrendPull)
+     {
+      bool bullZone = (C1 >= ema21 * 0.9985 && C1 <= ema50 * 1.002);
+      bool bearZone = (C1 <= ema21 * 1.0015 && C1 >= ema50 * 0.998);
 
-        if (htf_bull && micro_bull && bullZone &&
-            rsi > RSI_OS && rsi < RSI_OB && bs >= MinSignalScore)
+      if(htfBull && microBull && bullZone && rsi > 30 && rsi < 70 && bs >= MinScore)
         {
-            LastSignalBar = Bars;
-            return 1;
+         g_LastSignalBars = Bars;
+         return(1);
         }
-        if (htf_bear && micro_bear && bearZone &&
-            rsi < RSI_OB && rsi > RSI_OS && ss >= MinSignalScore)
+      if(htfBear && microBear && bearZone && rsi > 30 && rsi < 70 && ss >= MinScore)
         {
-            LastSignalBar = Bars;
-            return -1;
+         g_LastSignalBars = Bars;
+         return(-1);
         }
-    }
+     }
 
-    // ── Strategy 3: NY Session Momentum ──────────────────────────
-    // VWAP removed — use EMA50 as intraday reference instead
-    if (UseStrategy_NYMomentum && inNYOpen)
-    {
-        bool aboveEMA50 = (C1 > ema50);
-        bool belowEMA50 = (C1 < ema50);
-
-        if (htf_bull && aboveEMA50 && mom12 > 0 && roc5 > 0 &&
-            volRatio > 1.5 && adx > ADX_MinValue &&
-            diPlus > diMinus && bs >= MinSignalScore)
+   //--- Strategy 3: NY Momentum
+   if(UseNYMomentum && inNYOpen)
+     {
+      if(htfBull && C1 > ema50 && mom > 0 && roc > 0 &&
+         volRatio > 1.5 && adx > ADX_Min && diP > diM && bs >= MinScore)
         {
-            LastSignalBar = Bars;
-            return 1;
+         g_LastSignalBars = Bars;
+         return(1);
         }
-        if (htf_bear && belowEMA50 && mom12 < 0 && roc5 < 0 &&
-            volRatio > 1.5 && adx > ADX_MinValue &&
-            diMinus > diPlus && ss >= MinSignalScore)
+      if(htfBear && C1 < ema50 && mom < 0 && roc < 0 &&
+         volRatio > 1.5 && adx > ADX_Min && diM > diP && ss >= MinScore)
         {
-            LastSignalBar = Bars;
-            return -1;
+         g_LastSignalBars = Bars;
+         return(-1);
         }
-    }
+     }
 
-    return 0;
-}
+   return(0);
+  }
 
 //+------------------------------------------------------------------+
-//| EXECUTE TRADE                                                     |
+//| Place order                                                       |
 //+------------------------------------------------------------------+
-void ExecuteTrade(int dir)
-{
-    double atr    = iATR(NULL, 0, ATR_Period, 1);
-    double ask    = MarketInfo(Symbol(), MODE_ASK);
-    double bid    = MarketInfo(Symbol(), MODE_BID);
-    int    digits = (int)MarketInfo(Symbol(), MODE_DIGITS);
+void PlaceOrder(int dir)
+  {
+   double atr    = iATR(NULL, 0, ATR_Period, 1);
+   double ask    = MarketInfo(Symbol(), MODE_ASK);
+   double bid    = MarketInfo(Symbol(), MODE_BID);
+   int    digits = (int)MarketInfo(Symbol(), MODE_DIGITS);
 
-    double entry, sl, tp;
-    int    otype;
+   double entry, sl, tp;
+   int    otype;
 
-    if (dir == 1)   // BUY
-    {
-        entry = ask;
-        sl    = NormalizeDouble(entry - atr * SL_ATR_Mult, digits);
-        tp    = NormalizeDouble(entry + atr * SL_ATR_Mult * MinRR, digits);
+   if(dir == 1)
+     {
+      entry = ask;
+      sl    = NormalizeDouble(entry - atr * SL_Mult, digits);
+      tp    = NormalizeDouble(entry + atr * SL_Mult * MinRR, digits);
 
-        // London BO: use range-based levels
-        if (LondonRangeSet && TimeHour(TimeGMT()) < London_Open_UTC + 3)
+      if(g_RangeSet && TimeHour(TimeGMT()) < London_Open + 3)
         {
-            double mid   = (LondonRangeHigh + LondonRangeLow) / 2.0;
-            double rSize = LondonRangeHigh - LondonRangeLow;
-            sl = NormalizeDouble(mid - atr * 0.5, digits);
-            tp = NormalizeDouble(LondonRangeHigh + rSize * LB_TargetMult, digits);
+         double mid   = (g_RangeHigh + g_RangeLow) / 2.0;
+         double rng   = g_RangeHigh - g_RangeLow;
+         sl = NormalizeDouble(mid - atr * 0.5, digits);
+         tp = NormalizeDouble(g_RangeHigh + rng * LB_TPMult, digits);
         }
-        otype = OP_BUY;
-    }
-    else            // SELL
-    {
-        entry = bid;
-        sl    = NormalizeDouble(entry + atr * SL_ATR_Mult, digits);
-        tp    = NormalizeDouble(entry - atr * SL_ATR_Mult * MinRR, digits);
+      otype = OP_BUY;
+     }
+   else
+     {
+      entry = bid;
+      sl    = NormalizeDouble(entry + atr * SL_Mult, digits);
+      tp    = NormalizeDouble(entry - atr * SL_Mult * MinRR, digits);
 
-        if (LondonRangeSet && TimeHour(TimeGMT()) < London_Open_UTC + 3)
+      if(g_RangeSet && TimeHour(TimeGMT()) < London_Open + 3)
         {
-            double mid   = (LondonRangeHigh + LondonRangeLow) / 2.0;
-            double rSize = LondonRangeHigh - LondonRangeLow;
-            sl = NormalizeDouble(mid + atr * 0.5, digits);
-            tp = NormalizeDouble(LondonRangeLow - rSize * LB_TargetMult, digits);
+         double mid   = (g_RangeHigh + g_RangeLow) / 2.0;
+         double rng   = g_RangeHigh - g_RangeLow;
+         sl = NormalizeDouble(mid + atr * 0.5, digits);
+         tp = NormalizeDouble(g_RangeLow - rng * LB_TPMult, digits);
         }
-        otype = OP_SELL;
-    }
+      otype = OP_SELL;
+     }
 
-    // Validate SL/TP distances
-    double riskPts   = MathAbs(entry - sl);
-    double rewardPts = MathAbs(tp - entry);
-    if (riskPts <= 0 || rewardPts / riskPts < MinRR)
-    {
-        Print("GoldMaster: Skipped — R:R too low (",
-              DoubleToStr(rewardPts / riskPts, 2), " < ", MinRR, ")");
-        return;
-    }
+   //--- Validate R:R
+   double riskPts   = MathAbs(entry - sl);
+   double rewardPts = MathAbs(tp    - entry);
+   if(riskPts <= 0 || (rewardPts / riskPts) < MinRR)
+     {
+      Print("GoldMaster: Skipped trade - R:R too low");
+      return;
+     }
 
-    // ── Position sizing (tick-based — broker-agnostic for XAUUSD) ─
-    double riskUSD   = AccountEquity() * RiskPerTrade_Pct / 100.0;
-    double tickSize  = MarketInfo(Symbol(), MODE_TICKSIZE);
-    double tickValue = MarketInfo(Symbol(), MODE_TICKVALUE);
+   //--- Position size using tick value (works correctly for XAUUSD)
+   double riskUSD   = AccountEquity() * RiskPct / 100.0;
+   double tickSz    = MarketInfo(Symbol(), MODE_TICKSIZE);
+   double tickVal   = MarketInfo(Symbol(), MODE_TICKVALUE);
 
-    if (tickSize <= 0 || tickValue <= 0)
-    {
-        Print("GoldMaster: Invalid tick data — cannot size position.");
-        return;
-    }
+   if(tickSz <= 0 || tickVal <= 0)
+     {
+      Print("GoldMaster: Tick data error - cannot calculate lot size");
+      return;
+     }
 
-    double slTicks = riskPts / tickSize;
-    double lots    = riskUSD / (slTicks * tickValue);
+   double slTicks = riskPts / tickSz;
+   double lots    = riskUSD / (slTicks * tickVal);
 
-    // Normalise to broker step/min/max
-    double lotStep = MarketInfo(Symbol(), MODE_LOTSTEP);
-    double lotMin  = MarketInfo(Symbol(), MODE_MINLOT);
-    double lotMax  = MarketInfo(Symbol(), MODE_MAXLOT);
-    lots = MathFloor(lots / lotStep) * lotStep;
-    lots = MathMax(lotMin, MathMin(lotMax, lots));
-    lots = NormalizeDouble(lots, 2);
+   double lotStep = MarketInfo(Symbol(), MODE_LOTSTEP);
+   double lotMin  = MarketInfo(Symbol(), MODE_MINLOT);
+   double lotMax  = MarketInfo(Symbol(), MODE_MAXLOT);
+   lots = MathFloor(lots / lotStep) * lotStep;
+   lots = MathMax(lotMin, MathMin(lotMax, lots));
+   lots = NormalizeDouble(lots, 2);
 
-    if (lots <= 0)
-    {
-        Print("GoldMaster: Lot size calculated as 0 — skipping.");
-        return;
-    }
+   if(lots <= 0)
+     {
+      Print("GoldMaster: Lot size is 0 - skipping");
+      return;
+     }
 
-    // Send order
-    string cmt = StringFormat("GMP %s | Score | Magic:%d",
-                              dir == 1 ? "BUY" : "SELL", MagicNumber);
-    int ticket = OrderSend(Symbol(), otype, lots, entry, 3,
-                           sl, tp, cmt, MagicNumber, 0,
-                           dir == 1 ? clrLime : clrRed);
+   //--- Send order
+   string cmt = (dir == 1) ? "GMP BUY" : "GMP SELL";
+   color  clr = (dir == 1) ? clrLime   : clrRed;
 
-    if (ticket < 0)
-    {
-        int err = GetLastError();
-        Print("GoldMaster: OrderSend failed — error ", err,
-              " (", ErrorDescription(err), ")");
-        return;
-    }
+   int ticket = OrderSend(Symbol(), otype, lots, entry, 3, sl, tp, cmt, Magic, 0, clr);
 
-    TodayTradeCount++;
-    Print("GoldMaster: Order opened | Ticket:", ticket,
-          " | ", dir == 1 ? "BUY" : "SELL",
-          " | Entry:", DoubleToStr(entry, digits),
-          " | SL:", DoubleToStr(sl, digits),
-          " | TP:", DoubleToStr(tp, digits),
-          " | Lots:", DoubleToStr(lots, 2),
-          " | Risk:$", DoubleToStr(riskUSD, 2));
-}
+   if(ticket < 0)
+     {
+      int err = GetLastError();
+      Print("GoldMaster: OrderSend failed. Error=", err);
+      return;
+     }
+
+   g_TodayTrades++;
+   Print("GoldMaster: Order placed. Ticket=", ticket,
+         " Dir=", (dir==1?"BUY":"SELL"),
+         " Entry=", DoubleToStr(entry, digits),
+         " SL=", DoubleToStr(sl, digits),
+         " TP=", DoubleToStr(tp, digits),
+         " Lots=", DoubleToStr(lots, 2));
+  }
 
 //+------------------------------------------------------------------+
-//| MANAGE OPEN TRADES — trailing stop + partial close               |
+//| Manage open trades - trailing stop + partial close               |
 //+------------------------------------------------------------------+
-void ManageOpenTrades()
-{
-    for (int i = OrdersTotal() - 1; i >= 0; i--)
-    {
-        if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if (OrderMagicNumber() != MagicNumber)           continue;
-        if (OrderSymbol()      != Symbol())              continue;
+void ManageTrades()
+  {
+   int i;
+   for(i = OrdersTotal() - 1; i >= 0; i--)
+     {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() != Magic)    continue;
+      if(OrderSymbol()      != Symbol()) continue;
 
-        double atr        = iATR(NULL, 0, ATR_Period, 1);
-        double openPrice  = OrderOpenPrice();
-        double curSL      = OrderStopLoss();
-        double curTP      = OrderTakeProfit();
-        double initRisk   = MathAbs(openPrice - curSL);
-        int    digits     = (int)MarketInfo(Symbol(), MODE_DIGITS);
-        double point      = MarketInfo(Symbol(), MODE_POINT);
-        double bid        = MarketInfo(Symbol(), MODE_BID);
-        double ask        = MarketInfo(Symbol(), MODE_ASK);
+      double atr       = iATR(NULL, 0, ATR_Period, 1);
+      double openPx    = OrderOpenPrice();
+      double curSL     = OrderStopLoss();
+      double curTP     = OrderTakeProfit();
+      double initRisk  = MathAbs(openPx - curSL);
+      int    digits    = (int)MarketInfo(Symbol(), MODE_DIGITS);
+      double bid       = MarketInfo(Symbol(), MODE_BID);
+      double ask       = MarketInfo(Symbol(), MODE_ASK);
+      double lotStep   = MarketInfo(Symbol(), MODE_LOTSTEP);
+      double lotMin    = MarketInfo(Symbol(), MODE_MINLOT);
 
-        // ── BUY trade ────────────────────────────────────────────
-        if (OrderType() == OP_BUY)
+      if(OrderType() == OP_BUY)
         {
-            double floatProfit = bid - openPrice;
-            double profitR     = (initRisk > 0) ? floatProfit / initRisk : 0;
+         double profR = (initRisk > 0) ? (bid - openPx) / initRisk : 0;
 
-            // Move to breakeven at 1R
-            if (profitR >= 1.0 && curSL < openPrice)
-            {
-                double be = NormalizeDouble(openPrice + point, digits);
-                OrderModify(OrderTicket(), openPrice, be, curTP, 0, clrBlue);
-            }
+         //--- Breakeven at 1R
+         if(profR >= 1.0 && curSL < openPx)
+           {
+            double be = NormalizeDouble(openPx + MarketInfo(Symbol(), MODE_POINT), digits);
+            bool modOk = OrderModify(OrderTicket(), openPx, be, curTP, 0, clrBlue);
+            if(!modOk) Print("GoldMaster: BE modify failed. Err=", GetLastError());
+           }
 
-            // Partial close at 1.5R
-            if (UsePartialClose && profitR >= PartialClose_R &&
-                StringFind(OrderComment(), "PC") == -1)
-            {
-                double closeVol = NormalizeDouble(
-                    OrderLots() * PartialClose_Pct / 100.0, 2);
-                double step = MarketInfo(Symbol(), MODE_LOTSTEP);
-                closeVol = MathFloor(closeVol / step) * step;
-                if (closeVol >= MarketInfo(Symbol(), MODE_MINLOT) &&
-                    OrderLots() > closeVol + MarketInfo(Symbol(), MODE_MINLOT))
-                {
-                    if (OrderClose(OrderTicket(), closeVol, bid, 3, clrYellow))
-                        Print("GoldMaster: Partial close at 1.5R | lots: ", closeVol);
-                }
-            }
+         //--- Partial close at 1.5R
+         if(UsePartial && profR >= PartialR && StringFind(OrderComment(), "PC") < 0)
+           {
+            double cv = NormalizeDouble(OrderLots() * PartialPct / 100.0, 2);
+            cv = MathFloor(cv / lotStep) * lotStep;
+            if(cv >= lotMin && OrderLots() > cv + lotMin)
+              {
+               if(OrderClose(OrderTicket(), cv, bid, 3, clrYellow))
+                  Print("GoldMaster: Partial close done. Lots=", cv);
+              }
+           }
 
-            // Trailing stop after TrailActivate_R
-            if (UseTrailingStop && profitR >= TrailActivate_R)
-            {
-                double newSL = NormalizeDouble(bid - atr * TrailATR_Mult, digits);
-                if (newSL > curSL && newSL > openPrice)
-                    OrderModify(OrderTicket(), openPrice, newSL, curTP, 0, clrCyan);
-            }
+         //--- Trail
+         if(UseTrail && profR >= TrailStartR)
+           {
+            double newSL = NormalizeDouble(bid - atr * TrailATRMult, digits);
+            if(newSL > curSL && newSL > openPx)
+              {
+               bool modOk = OrderModify(OrderTicket(), openPx, newSL, curTP, 0, clrCyan);
+               if(!modOk) Print("GoldMaster: Trail modify failed. Err=", GetLastError());
+              }
+           }
         }
 
-        // ── SELL trade ───────────────────────────────────────────
-        if (OrderType() == OP_SELL)
+      if(OrderType() == OP_SELL)
         {
-            double floatProfit = openPrice - ask;
-            double profitR     = (initRisk > 0) ? floatProfit / initRisk : 0;
+         double profR = (initRisk > 0) ? (openPx - ask) / initRisk : 0;
 
-            // Move to breakeven at 1R
-            if (profitR >= 1.0 && (curSL == 0 || curSL > openPrice))
-            {
-                double be = NormalizeDouble(openPrice - point, digits);
-                OrderModify(OrderTicket(), openPrice, be, curTP, 0, clrBlue);
-            }
+         //--- Breakeven at 1R
+         if(profR >= 1.0 && (curSL == 0 || curSL > openPx))
+           {
+            double be = NormalizeDouble(openPx - MarketInfo(Symbol(), MODE_POINT), digits);
+            bool modOk = OrderModify(OrderTicket(), openPx, be, curTP, 0, clrBlue);
+            if(!modOk) Print("GoldMaster: BE modify failed. Err=", GetLastError());
+           }
 
-            // Partial close at 1.5R
-            if (UsePartialClose && profitR >= PartialClose_R &&
-                StringFind(OrderComment(), "PC") == -1)
-            {
-                double closeVol = NormalizeDouble(
-                    OrderLots() * PartialClose_Pct / 100.0, 2);
-                double step = MarketInfo(Symbol(), MODE_LOTSTEP);
-                closeVol = MathFloor(closeVol / step) * step;
-                if (closeVol >= MarketInfo(Symbol(), MODE_MINLOT) &&
-                    OrderLots() > closeVol + MarketInfo(Symbol(), MODE_MINLOT))
-                {
-                    if (OrderClose(OrderTicket(), closeVol, ask, 3, clrYellow))
-                        Print("GoldMaster: Partial close at 1.5R | lots: ", closeVol);
-                }
-            }
+         //--- Partial close at 1.5R
+         if(UsePartial && profR >= PartialR && StringFind(OrderComment(), "PC") < 0)
+           {
+            double cv = NormalizeDouble(OrderLots() * PartialPct / 100.0, 2);
+            cv = MathFloor(cv / lotStep) * lotStep;
+            if(cv >= lotMin && OrderLots() > cv + lotMin)
+              {
+               if(OrderClose(OrderTicket(), cv, ask, 3, clrYellow))
+                  Print("GoldMaster: Partial close done. Lots=", cv);
+              }
+           }
 
-            // Trailing stop
-            if (UseTrailingStop && profitR >= TrailActivate_R)
-            {
-                double newSL = NormalizeDouble(ask + atr * TrailATR_Mult, digits);
-                if (curSL == 0 || newSL < curSL)
-                    if (newSL < openPrice)
-                        OrderModify(OrderTicket(), openPrice, newSL, curTP, 0, clrCyan);
-            }
+         //--- Trail
+         if(UseTrail && profR >= TrailStartR)
+           {
+            double newSL = NormalizeDouble(ask + atr * TrailATRMult, digits);
+            if(curSL == 0 || (newSL < curSL && newSL < openPx))
+              {
+               bool modOk = OrderModify(OrderTicket(), openPx, newSL, curTP, 0, clrCyan);
+               if(!modOk) Print("GoldMaster: Trail modify failed. Err=", GetLastError());
+              }
+           }
         }
-    }
-}
+     }
+  }
 
 //+------------------------------------------------------------------+
-//| BUILD PRE-LONDON RANGE                                            |
+//| Build London pre-market range                                     |
 //+------------------------------------------------------------------+
-void UpdateLondonRange()
-{
-    datetime today = iTime(NULL, PERIOD_D1, 0);
-    if (today != LondonRangeDate)
-    {
-        LondonRangeDate = today;
-        LondonRangeHigh = 0;
-        LondonRangeLow  = 999999;
-        LondonRangeSet  = false;
-    }
+void BuildLondonRange()
+  {
+   datetime today = iTime(NULL, PERIOD_D1, 0);
+   if(today != g_RangeDate)
+     {
+      g_RangeDate = today;
+      g_RangeHigh = 0;
+      g_RangeLow  = 999999;
+      g_RangeSet  = false;
+     }
 
-    int h = TimeHour(TimeGMT());
-    if (h < LB_RangeStartHour || h >= LB_RangeEndHour) return;
+   int h = TimeHour(TimeGMT());
+   if(h < LB_StartHour || h >= LB_EndHour) return;
 
-    // Scan last 50 bars for those inside the range window
-    double rHigh = 0, rLow = 999999;
-    for (int i = 0; i < 50; i++)
-    {
-        datetime bt = iTime(NULL, 0, i);
-        int bh = TimeHour(bt);
-        if (bh < LB_RangeStartHour || bh >= LB_RangeEndHour) continue;
-        double hi = iHigh(NULL, 0, i);
-        double lo = iLow(NULL,  0, i);
-        if (hi > rHigh) rHigh = hi;
-        if (lo < rLow)  rLow  = lo;
-    }
+   double rh = 0, rl = 999999;
+   int i;
+   for(i = 0; i < 60; i++)
+     {
+      datetime bt = iTime(NULL, 0, i);
+      int bh = TimeHour(bt);
+      if(bh < LB_StartHour || bh >= LB_EndHour) continue;
+      double hi = iHigh(NULL, 0, i);
+      double lo = iLow(NULL,  0, i);
+      if(hi > rh) rh = hi;
+      if(lo < rl) rl = lo;
+     }
 
-    if (rHigh > 0 && rLow < 999999)
-    {
-        LondonRangeHigh = rHigh;
-        LondonRangeLow  = rLow;
-        LondonRangeSet  = true;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| COUNT EA's OPEN ORDERS                                            |
-//+------------------------------------------------------------------+
-int CountOpenOrders()
-{
-    int n = 0;
-    for (int i = 0; i < OrdersTotal(); i++)
-        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES) &&
-            OrderMagicNumber() == MagicNumber &&
-            OrderSymbol() == Symbol()) n++;
-    return n;
-}
+   if(rh > 0 && rl < 999999)
+     {
+      g_RangeHigh = rh;
+      g_RangeLow  = rl;
+      g_RangeSet  = true;
+     }
+  }
 
 //+------------------------------------------------------------------+
-//| TODAY'S P&L (open + closed)                                      |
+//| Count this EA's open orders                                       |
 //+------------------------------------------------------------------+
-double GetTodayPnL()
-{
-    double pnl = 0;
-    datetime dayStart = iTime(NULL, PERIOD_D1, 0);
-
-    for (int i = 0; i < OrdersTotal(); i++)
-        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES) &&
-            OrderMagicNumber() == MagicNumber &&
-            OrderSymbol() == Symbol())
-            pnl += OrderProfit() + OrderSwap() + OrderCommission();
-
-    for (int i = OrdersHistoryTotal() - 1; i >= 0; i--)
-        if (OrderSelect(i, SELECT_BY_HISTORY, MODE_HISTORY) &&
-            OrderMagicNumber() == MagicNumber &&
-            OrderSymbol() == Symbol() &&
-            OrderCloseTime() >= dayStart)
-            pnl += OrderProfit() + OrderSwap() + OrderCommission();
-
-    return pnl;
-}
+int OpenOrderCount()
+  {
+   int n = 0, i;
+   for(i = 0; i < OrdersTotal(); i++)
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES) &&
+         OrderMagicNumber() == Magic &&
+         OrderSymbol()      == Symbol()) n++;
+   return(n);
+  }
 
 //+------------------------------------------------------------------+
-//| DASHBOARD COMMENT                                                 |
+//| Dashboard comment on chart                                        |
 //+------------------------------------------------------------------+
-void DrawDashboard()
-{
-    double eq       = AccountEquity();
-    double todayPnL = GetTodayPnL();
-    double dailyDD  = (TodayStartEquity > 0)
-                      ? (eq - TodayStartEquity) / TodayStartEquity * 100.0 : 0;
-    double totalDD  = (AccountStartEquity > 0)
-                      ? (eq - AccountStartEquity) / AccountStartEquity * 100.0 : 0;
+void ShowDashboard()
+  {
+   double eq      = AccountEquity();
+   double dailyDD = (g_TodayStartEquity > 0)
+                    ? (eq - g_TodayStartEquity) / g_TodayStartEquity * 100.0 : 0;
+   double totalDD = (g_StartEquity > 0)
+                    ? (eq - g_StartEquity) / g_StartEquity * 100.0 : 0;
 
-    string status;
-    if (TradingSuspended)
-        status = "SUSPENDED: " + SuspendReason;
-    else if (!CanTrade())
-        status = "WAITING (session/limit)";
-    else
-        status = "ACTIVE";
+   string st = g_Suspended ? "SUSPENDED: " + g_SuspendReason :
+               (CanTrade() ? "ACTIVE" : "WAITING");
 
-    string txt = "";
-    txt += "══ GoldMaster Pro v2.1 ══\n";
-    txt += "Symbol:       " + Symbol() + "\n";
-    txt += "Equity:      $" + DoubleToStr(eq, 2) + "\n";
-    txt += "Today P&L:   $" + DoubleToStr(todayPnL, 2)
-         + " (" + DoubleToStr(dailyDD, 2) + "%)\n";
-    txt += "Total DD:     " + DoubleToStr(totalDD, 2) + "%\n";
-    txt += "Trades today: " + IntegerToString(TodayTradeCount)
-         + " / " + IntegerToString(MaxTradesPerDay) + "\n";
-    txt += "Open trades:  " + IntegerToString(CountOpenOrders()) + "\n";
-    txt += "Prop mode:    " + (PropFirmMode ? "ON" : "OFF") + "\n";
-    txt += "Status:       " + status + "\n";
-    txt += "London range: "
-         + (LondonRangeSet
-            ? DoubleToStr(LondonRangeLow, 2) + " – " + DoubleToStr(LondonRangeHigh, 2)
-            : "Building...") + "\n";
-    txt += "Daily limit: -$"
-         + DoubleToStr(TodayStartEquity * MaxDailyLoss_Pct / 100.0, 2);
+   string rng = g_RangeSet
+                ? DoubleToStr(g_RangeLow,2) + " to " + DoubleToStr(g_RangeHigh,2)
+                : "Building...";
 
-    Comment(txt);
-}
+   string txt = "GoldMaster Pro v3.0\n"
+              + "Equity:  $" + DoubleToStr(eq, 2) + "\n"
+              + "Day P&L: " + DoubleToStr(dailyDD, 2) + "%\n"
+              + "Total DD: " + DoubleToStr(totalDD, 2) + "%\n"
+              + "Trades: " + IntegerToString(g_TodayTrades) + "/" + IntegerToString(MaxDailyTrades) + "\n"
+              + "Open: " + IntegerToString(OpenOrderCount()) + "\n"
+              + "Range: " + rng + "\n"
+              + "Status: " + st;
+
+   Comment(txt);
+  }
 //+------------------------------------------------------------------+
