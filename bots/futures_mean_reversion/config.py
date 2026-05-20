@@ -1,6 +1,10 @@
 """
-TradeMasteryOS — Bot Configuration
-Tuned for: Lucid 25K Evaluation | MNQ + MGC | Telegram alerts
+TradeMasteryOS — Futures Mean Reversion Bot
+Supports all Lucid Trading and TopStep evaluation plans.
+
+Select your plan via env var or CLI:
+  PROP_FIRM_PLAN=topstep_100k python scanner.py
+  python scanner.py --plan lucid_50k
 """
 
 from dataclasses import dataclass, field
@@ -15,15 +19,14 @@ class ContractConfig:
     symbol: str = "MNQ"
     exchange: str = "CME"
     tick_size: float = 0.25
-    tick_value: float = 0.50        # MNQ = $0.50/tick
-    point_value: float = 2.0        # MNQ = $2/point
+    tick_value: float = 0.50
+    point_value: float = 2.0
     margin_per_contract: float = 2_200.0
     data_timeframe: str = "1D"
     session_start: str = "09:30"
     session_end: str = "16:00"
 
 
-# Preset contract specs — used by the multi-symbol scanner
 CONTRACT_SPECS = {
     "MNQ": ContractConfig(
         symbol="MNQ",
@@ -35,22 +38,168 @@ CONTRACT_SPECS = {
     "MGC": ContractConfig(
         symbol="MGC",
         tick_size=0.10,
-        tick_value=1.00,            # MGC = $1/tick, $10/point
+        tick_value=1.00,
         point_value=10.0,
         margin_per_contract=800.0,
     ),
+    "MES": ContractConfig(
+        symbol="MES",
+        tick_size=0.25,
+        tick_value=1.25,
+        point_value=5.0,
+        margin_per_contract=1_320.0,
+    ),
+    "MCL": ContractConfig(
+        symbol="MCL",
+        tick_size=0.01,
+        tick_value=1.00,
+        point_value=100.0,
+        margin_per_contract=1_500.0,
+    ),
 }
 
-# yfinance tickers for each symbol
 YFINANCE_MAP = {
-    "MNQ": "NQ=F",    # E-mini Nasdaq-100 continuous
-    "MGC": "GC=F",    # Gold continuous
+    "MNQ": "NQ=F",
+    "MGC": "GC=F",
     "MES": "ES=F",
     "MCL": "CL=F",
 }
 
 
-# ─── IBS Strategy ─────────────────────────────────────────────────────────────
+# ─── Prop Firm Plan Registry ──────────────────────────────────────────────────
+
+@dataclass
+class PropFirmPlan:
+    """One row per evaluation plan. All dollar amounts are absolute."""
+    key: str                         # e.g. "lucid_25k"
+    display_name: str                # e.g. "Lucid 25K"
+    firm: str                        # "lucid" | "topstep"
+    account_size: float              # starting balance
+    profit_target: float             # dollars to pass eval
+    daily_loss_limit: float          # max intraday loss before auto-flatten
+    trailing_drawdown: float         # max drawdown from equity peak
+    min_trading_days: int            # minimum days before passing
+    max_contracts_default: int       # conservative cap for eval
+    no_overnight_hold: bool = False  # some plans require flat at close
+
+
+# ── Lucid Trading ─────────────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at lucidtrading.com before trading
+
+_LUCID_PLANS = [
+    PropFirmPlan(
+        key="lucid_10k",
+        display_name="Lucid 10K",
+        firm="lucid",
+        account_size=10_000,
+        profit_target=700,
+        daily_loss_limit=200,
+        trailing_drawdown=500,
+        min_trading_days=5,
+        max_contracts_default=1,
+    ),
+    PropFirmPlan(
+        key="lucid_25k",
+        display_name="Lucid 25K",
+        firm="lucid",
+        account_size=25_000,
+        profit_target=1_500,
+        daily_loss_limit=500,
+        trailing_drawdown=1_000,
+        min_trading_days=10,
+        max_contracts_default=2,
+    ),
+    PropFirmPlan(
+        key="lucid_50k",
+        display_name="Lucid 50K",
+        firm="lucid",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="lucid_100k",
+        display_name="Lucid 100K",
+        firm="lucid",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=10,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="lucid_150k",
+        display_name="Lucid 150K",
+        firm="lucid",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=10,
+        max_contracts_default=12,
+    ),
+]
+
+# ── TopStep ───────────────────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at topstep.com before trading
+
+_TOPSTEP_PLANS = [
+    PropFirmPlan(
+        key="topstep_50k",
+        display_name="TopStep 50K",
+        firm="topstep",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="topstep_100k",
+        display_name="TopStep 100K",
+        firm="topstep",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=3_000,
+        min_trading_days=10,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="topstep_150k",
+        display_name="TopStep 150K",
+        firm="topstep",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=4_500,
+        min_trading_days=10,
+        max_contracts_default=12,
+    ),
+]
+
+PROP_FIRM_PLANS: dict[str, PropFirmPlan] = {
+    p.key: p for p in _LUCID_PLANS + _TOPSTEP_PLANS
+}
+
+DEFAULT_PLAN_KEY = os.getenv("PROP_FIRM_PLAN", "lucid_25k")
+
+
+def get_plan(key: str | None = None) -> PropFirmPlan:
+    """Return a PropFirmPlan by key. Falls back to DEFAULT_PLAN_KEY."""
+    k = (key or DEFAULT_PLAN_KEY).lower().replace("-", "_").replace(" ", "_")
+    if k not in PROP_FIRM_PLANS:
+        available = ", ".join(PROP_FIRM_PLANS)
+        raise ValueError(f"Unknown plan '{k}'. Available: {available}")
+    return PROP_FIRM_PLANS[k]
+
+
+# ─── Strategy Config ──────────────────────────────────────────────────────────
 
 @dataclass
 class IBSStrategyConfig:
@@ -68,8 +217,6 @@ class IBSStrategyConfig:
     intraday_reset_daily: bool = True
 
 
-# ─── Dual Thrust (alternative) ────────────────────────────────────────────────
-
 @dataclass
 class DualThrustConfig:
     lookback: int = 1
@@ -79,30 +226,43 @@ class DualThrustConfig:
     reverse_intraday: bool = False
 
 
-# ─── Risk — Lucid 25K Evaluation ──────────────────────────────────────────────
+# ─── Risk — loaded from the active PropFirmPlan ───────────────────────────────
+
+def _build_risk(plan: PropFirmPlan) -> "RiskConfig":
+    """Derive RiskConfig values from a PropFirmPlan."""
+    return RiskConfig(
+        risk_pct_per_trade=0.005,                                     # 0.5% per trade
+        atr_stop_multiplier=1.5,
+        max_contracts=plan.max_contracts_default,
+        daily_loss_limit_pct=plan.daily_loss_limit / plan.account_size,
+        trailing_drawdown_pct=plan.trailing_drawdown / plan.account_size,
+        max_profit_single_day_pct=0.40,
+        profit_target=plan.profit_target,
+        min_trading_days=plan.min_trading_days,
+        no_overnight_hold=plan.no_overnight_hold,
+        commission_per_side=2.25,
+        slippage_ticks=1,
+    )
+
 
 @dataclass
 class RiskConfig:
-    # Per-trade: 0.5% of $25K = $125 max risk per trade (conservative for eval)
     risk_pct_per_trade: float = 0.005
     atr_stop_multiplier: float = 1.5
-    max_contracts: int = 2                  # stay small during eval
+    max_contracts: int = 2
 
-    # Lucid 25K hard limits
-    daily_loss_limit_pct: float = 0.02      # $500/day max loss
-    trailing_drawdown_pct: float = 0.04     # $1,000 trailing DD limit
+    daily_loss_limit_pct: float = 0.02
+    trailing_drawdown_pct: float = 0.04
     max_position_pct_of_margin: float = 0.50
 
-    # Consistency (Lucid flags single-day dominance)
-    max_profit_single_day_pct: float = 0.40  # no single day > 40% of $1,500 target
-    profit_target: float = 1_500.0           # Lucid 25K profit target
+    max_profit_single_day_pct: float = 0.40
+    profit_target: float = 1_500.0
     min_trading_days: int = 10
     no_overnight_hold: bool = False
 
     use_kelly: bool = False
     kelly_fraction: float = 0.25
 
-    # Realistic fill costs (Lucid uses Rithmic/Tradovate, ~$2.25/side MNQ)
     commission_per_side: float = 2.25
     slippage_ticks: int = 1
 
@@ -113,7 +273,7 @@ class RiskConfig:
 class BacktestConfig:
     start_date: str = "2015-01-01"
     end_date: str = "2024-12-31"
-    initial_capital: float = 25_000.0      # Lucid 25K
+    initial_capital: float = 25_000.0
     data_source: str = "yfinance"
     csv_path: Optional[str] = None
     walk_forward_splits: int = 5
@@ -126,16 +286,15 @@ class BacktestConfig:
 @dataclass
 class LiveConfig:
     broker: str = "tradovate"
-    paper_trade: bool = True                # flip to False only after eval passes
+    paper_trade: bool = True
     tradovate_base_url: str = "https://demo.tradovateapi.com/v1"
-    # Credentials loaded from environment variables (never hardcode)
     tradovate_user: str = os.getenv("TRADOVATE_USER", "")
     tradovate_password: str = os.getenv("TRADOVATE_PASS", "")
     tradovate_app_id: str = os.getenv("TRADOVATE_APP_ID", "")
     tradovate_app_version: str = "1.0"
     rithmic_user: str = os.getenv("RITHMIC_USER", "")
     rithmic_password: str = os.getenv("RITHMIC_PASS", "")
-    poll_interval_sec: int = 3_600          # check once per hour (daily strategy)
+    poll_interval_sec: int = 3_600
 
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
@@ -163,9 +322,19 @@ class Config:
     live: LiveConfig = field(default_factory=LiveConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     active_strategy: str = "ibs"
-    # Symbols to scan — bot checks both and alerts on whichever fires
     scan_symbols: list = field(default_factory=lambda: ["MNQ", "MGC"])
     log_level: str = "INFO"
+    # Active plan — applied at startup
+    plan: PropFirmPlan = field(default_factory=get_plan)
+
+    def apply_plan(self, plan_key: str | None = None) -> "Config":
+        """Swap to a different plan at runtime (e.g. from CLI --plan arg)."""
+        self.plan = get_plan(plan_key)
+        self.risk = _build_risk(self.plan)
+        self.backtest.initial_capital = self.plan.account_size
+        return self
 
 
+# Singleton — call CONFIG.apply_plan("topstep_100k") if you need to override
 CONFIG = Config()
+CONFIG.apply_plan()   # applies DEFAULT_PLAN_KEY (env var or lucid_25k)

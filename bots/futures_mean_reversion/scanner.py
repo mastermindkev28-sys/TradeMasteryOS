@@ -1,17 +1,22 @@
 """
-Daily Signal Scanner — MNQ + MGC
-----------------------------------
-Run once after 4pm ET close (or schedule with cron).
-Scans both symbols, formats a Telegram message, and sends it.
-No broker connection required — uses yfinance for data.
+Daily Signal Scanner — MNQ + MGC (multi-symbol, multi-plan)
+------------------------------------------------------------
+Run once after 4pm ET close (or schedule via cron/Task Scheduler).
+Reads daily bars from yfinance — no broker API needed.
 
 Usage:
-  python scanner.py                  # scan all symbols in config
-  python scanner.py --symbol MNQ     # scan one symbol only
-  python scanner.py --dry-run        # print message, don't send Telegram
+  python scanner.py                          # uses PROP_FIRM_PLAN env var (default: lucid_25k)
+  python scanner.py --plan topstep_100k      # override plan for this run
+  python scanner.py --symbol MNQ             # single symbol
+  python scanner.py --list-plans             # print all supported plans and exit
+  python scanner.py --dry-run                # print message, skip Telegram send
 
-Cron (run at 4:15pm ET Mon-Fri):
-  15 16 * * 1-5 cd /path/to/bot && python scanner.py >> logs/scanner.log 2>&1
+Available plans (--list-plans for full table):
+  Lucid:   lucid_10k, lucid_25k, lucid_50k, lucid_100k, lucid_150k
+  TopStep: topstep_50k, topstep_100k, topstep_150k
+
+Cron (4:15pm ET Mon-Fri):
+  15 16 * * 1-5 cd /path/to/bot && source .env && python scanner.py >> logs/scanner.log 2>&1
 """
 
 import argparse
@@ -22,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP
+from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP, PROP_FIRM_PLANS
 from strategy.ibs_mean_reversion import IBSMeanReversion
 from live.telegram_alerts import TelegramAlerter
 from utils.position_sizing import fixed_fractional_contracts
@@ -39,7 +44,6 @@ def fetch_bars(symbol: str, n: int = 350):
     """Pull daily bars from yfinance. Returns DataFrame or None."""
     try:
         import yfinance as yf
-        import pandas as pd
         ticker = YFINANCE_MAP.get(symbol, symbol)
         df = yf.download(ticker, period="5y", interval="1d",
                          auto_adjust=True, progress=False)
@@ -53,11 +57,6 @@ def fetch_bars(symbol: str, n: int = 350):
 
 
 def scan_symbol(symbol: str, cfg=CONFIG) -> dict:
-    """
-    Returns a result dict for one symbol:
-      signal, ibs, lower_band, trend_sma, atr,
-      suggested_contracts, stop_price, reason
-    """
     spec = CONTRACT_SPECS.get(symbol)
     if not spec:
         return {"symbol": symbol, "error": f"No contract spec for {symbol}"}
@@ -100,6 +99,7 @@ def scan_symbol(symbol: str, cfg=CONFIG) -> dict:
 
 
 def format_telegram_message(results: list[dict], cfg=CONFIG) -> str:
+    plan = cfg.plan
     now = datetime.now().strftime("%a %b %d, %Y  %I:%M %p ET")
     lines = [f"📋 *Daily Signal Scan*  —  {now}", ""]
 
@@ -107,6 +107,7 @@ def format_telegram_message(results: list[dict], cfg=CONFIG) -> str:
     for r in results:
         if r.get("error"):
             lines.append(f"⚠️  *{r['symbol']}* — {r['error']}")
+            lines.append("")
             continue
 
         sym = r["symbol"]
@@ -114,45 +115,101 @@ def format_telegram_message(results: list[dict], cfg=CONFIG) -> str:
 
         if sig == "long":
             any_signal = True
-            risk_dollars = r["suggested_contracts"] * r["atr"] * cfg.risk.atr_stop_multiplier
             spec = CONTRACT_SPECS.get(sym)
-            risk_dollars *= spec.point_value if spec else 1
+            risk_dollars = (
+                r["suggested_contracts"]
+                * r["atr"]
+                * cfg.risk.atr_stop_multiplier
+                * (spec.point_value if spec else 1)
+            )
+            pct_of_daily = risk_dollars / plan.daily_loss_limit * 100
 
             lines += [
                 f"🟢 *{sym} — LONG SIGNAL*",
                 f"  Entry:      near `{r['last_close']:.2f}` at tomorrow's open",
                 f"  Stop:       `{r['stop_price']:.2f}`  ({cfg.risk.atr_stop_multiplier}× ATR)",
-                f"  Contracts:  `{r['suggested_contracts']}`  (risk ≈ ${risk_dollars:.0f})",
-                f"  IBS:        `{r['ibs']:.3f}`  (threshold {cfg.ibs.ibs_entry_threshold})",
+                f"  Contracts:  `{r['suggested_contracts']}`  "
+                f"(risk ≈ ${risk_dollars:.0f} = {pct_of_daily:.0f}% of daily limit)",
+                f"  IBS:        `{r['ibs']:.3f}`  (threshold ≤ {cfg.ibs.ibs_entry_threshold})",
                 f"  Band:       `{r['lower_band']:.2f}`  |  SMA300: `{r['trend_sma']:.2f}`",
                 "",
             ]
         else:
             lines += [
                 f"⚪ *{sym} — No signal*",
-                f"  IBS: `{r['ibs']:.3f}`  |  Band: `{r['lower_band']:.2f}`  |  Close: `{r['last_close']:.2f}`",
+                f"  IBS: `{r['ibs']:.3f}`  |  Band: `{r['lower_band']:.2f}`"
+                f"  |  Close: `{r['last_close']:.2f}`",
                 "",
             ]
 
     if not any_signal:
         lines.append("_No actionable signals today. Stay patient._")
+        lines.append("")
 
+    progress_bar = _progress_bar(plan)
     lines += [
-        "─────────────────────────────",
-        f"Account: Lucid 25K  |  Risk/trade: {cfg.risk.risk_pct_per_trade*100:.1f}%",
-        f"Daily loss limit: ${cfg.backtest.initial_capital * cfg.risk.daily_loss_limit_pct:.0f}  "
-        f"|  Trailing DD limit: ${cfg.backtest.initial_capital * cfg.risk.trailing_drawdown_pct:.0f}",
+        "─────────────────────────────────────────",
+        f"🏦  *{plan.display_name}*  |  Risk/trade: {cfg.risk.risk_pct_per_trade*100:.1f}%",
+        f"📉  Daily loss limit: `${plan.daily_loss_limit:,.0f}`"
+        f"  |  Trailing DD: `${plan.trailing_drawdown:,.0f}`",
+        f"🎯  Profit target: `${plan.profit_target:,.0f}`"
+        f"  |  Min days: `{plan.min_trading_days}`",
+        f"📊  Max contracts: `{plan.max_contracts_default}`",
+        progress_bar,
     ]
 
     return "\n".join(lines)
 
 
+def _progress_bar(plan, width: int = 20) -> str:
+    """Shows what % of profit target the daily limit represents (risk context)."""
+    ratio = plan.daily_loss_limit / plan.profit_target
+    filled = round(ratio * width)
+    bar = "█" * filled + "░" * (width - filled)
+    return f"Daily limit is {ratio*100:.0f}% of target  [{bar}]"
+
+
+def print_plans_table():
+    header = f"{'Key':<20} {'Firm':<10} {'Account':>10} {'Target':>10} {'Daily Limit':>12} {'Trail DD':>10} {'Max Cts':>8}"
+    print(header)
+    print("-" * len(header))
+    for p in PROP_FIRM_PLANS.values():
+        print(
+            f"{p.key:<20} {p.firm:<10} ${p.account_size:>9,.0f} "
+            f"${p.profit_target:>9,.0f} ${p.daily_loss_limit:>11,.0f} "
+            f"${p.trailing_drawdown:>9,.0f} {p.max_contracts_default:>8}"
+        )
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Daily IBS Signal Scanner")
-    parser.add_argument("--symbol", help="Scan a single symbol (e.g. MNQ)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print the Telegram message without sending")
+    parser = argparse.ArgumentParser(
+        description="TradeMastery Daily IBS Signal Scanner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--plan", help="Prop firm plan key (e.g. topstep_100k, lucid_50k)")
+    parser.add_argument("--symbol", help="Scan a single symbol (e.g. MNQ, MGC)")
+    parser.add_argument("--list-plans", action="store_true", help="Print all supported plans and exit")
+    parser.add_argument("--dry-run", action="store_true", help="Print message without sending Telegram")
     args = parser.parse_args()
+
+    if args.list_plans:
+        print_plans_table()
+        return
+
+    # Apply plan (CLI arg overrides env var overrides default)
+    if args.plan:
+        try:
+            CONFIG.apply_plan(args.plan)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    plan = CONFIG.plan
+    logger.info(f"Plan: {plan.display_name}  "
+                f"(target ${plan.profit_target:,.0f} | "
+                f"daily limit ${plan.daily_loss_limit:,.0f} | "
+                f"trailing DD ${plan.trailing_drawdown:,.0f})")
 
     symbols = [args.symbol] if args.symbol else CONFIG.scan_symbols
     logger.info(f"Scanning: {symbols}")
@@ -174,18 +231,19 @@ def main():
         print("\n" + "=" * 50)
         print(message)
         print("=" * 50)
-        print("\n[DRY RUN — message not sent]")
+        print("\n[DRY RUN — Telegram not sent]")
+        return
+
+    alerter = TelegramAlerter(CONFIG.telegram)
+    sent = alerter._send(message)
+    if sent:
+        logger.info("Telegram alert sent successfully.")
     else:
-        alerter = TelegramAlerter(CONFIG.telegram)
-        sent = alerter._send(message)
-        if sent:
-            logger.info("Telegram alert sent successfully.")
-        else:
-            logger.warning(
-                "Telegram not configured or send failed. "
-                "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars."
-            )
-            print("\n" + message)
+        logger.warning(
+            "Telegram not configured or send failed. "
+            "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars."
+        )
+        print("\n" + message)
 
 
 if __name__ == "__main__":
