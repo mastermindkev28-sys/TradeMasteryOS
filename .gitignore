@@ -4,3 +4,8 @@ out
 .env*
 .DS_Store
 tsconfig.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
