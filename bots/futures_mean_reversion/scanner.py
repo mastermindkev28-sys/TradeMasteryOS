@@ -19,6 +19,8 @@ Cron (4:15pm ET Mon-Fri):
   15 16 * * 1-5 cd /path/to/bot && source .env && python scanner.py >> logs/scanner.log 2>&1
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import sys

@@ -4,6 +4,8 @@ Handles commissions, slippage, overnight gaps, and prop-firm risk limits.
 Produces an equity curve, trade log, and full performance report.
 """
 
+from __future__ import annotations
+
 import logging
 import numpy as np
 import pandas as pd

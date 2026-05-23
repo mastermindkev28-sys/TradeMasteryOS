@@ -28,3 +28,4 @@ tabulate>=0.9
 # Testing
 pytest>=7.4
 schedule
+backports.zoneinfo;python_version<'3.9'

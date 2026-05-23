@@ -12,6 +12,8 @@ Usage:
 Managed by launchd on Mac (see com.trademastery.bot.plist).
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
@@ -19,7 +21,11 @@ import sys
 import time
 from datetime import datetime, date
 from pathlib import Path
-from zoneinfo import ZoneInfo          # Python 3.9+ built-in
+
+try:
+    from zoneinfo import ZoneInfo      # Python 3.9+ built-in
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # pip install backports.zoneinfo
 
 import schedule
 

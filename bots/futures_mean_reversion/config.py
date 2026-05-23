@@ -11,6 +11,8 @@ Select your plan via env var or CLI:
 ⚠️  Rules change — always verify at each firm's website before trading.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional
 import os
