@@ -80,14 +80,17 @@ class PropFirmPlan:
     firm: str                        # "lucid" | "topstep" | "apex" | ...
     account_size: float              # starting balance
     profit_target: float             # dollars to pass eval (0 = no target / instant funded)
-    daily_loss_limit: float          # max intraday loss — 0 = no daily limit (e.g. Bulenox Flex)
-    trailing_drawdown: float         # max drawdown from equity peak
-    min_trading_days: int            # minimum days before passing (0 = no minimum)
-    max_contracts_default: int       # conservative cap for this account size
+    daily_loss_limit: float          # max intraday loss — 0 = no daily limit (Flex plans)
+    trailing_drawdown: float         # max loss limit (EOD trailing from peak)
+    min_trading_days: int            # minimum days before passing / payout (0 = no minimum)
+    max_contracts_default: int       # conservative cap (Mini contracts)
     no_overnight_hold: bool = False  # some plans require flat at close
-    is_funded: bool = False          # True = already funded (Direct/Instant), False = evaluation
-    static_drawdown: bool = False    # True = DD from starting balance, False = trailing from peak
+    is_funded: bool = False          # True = already funded (Direct), False = evaluation
+    static_drawdown: bool = False    # True = DD measured from starting balance, not peak
+    eod_drawdown: bool = True        # True = drawdown measured at EOD (Lucid), not intraday
     account_type: str = "standard"   # "standard" | "pro" | "direct" | "flex" | "express" | "mini"
+    consistency_rule_pct: float = 0  # max % of total profit from single day (Direct: 0.20)
+    lucidscale_dll: bool = False     # True = DLL scales to 60% of peak EOD balance when profitable
 
 
 # ── Lucid Trading ─────────────────────────────────────────────────────────────
@@ -151,36 +154,29 @@ _LUCID_PLANS = [
     ),
 ]
 
-# ── Lucid Direct (Instant Funded) ─────────────────────────────────────────────
-#    No evaluation — live capital from day one. Profit split model (no fixed target).
-#    Rules as of 2025 — verify at lucidtrading.com before trading
+# ── Lucid Direct (Instant Funded — Straight to Funded) ────────────────────────
+#    No evaluation phase. EOD drawdown. DLL below initial trail is fixed;
+#    above initial trail uses LucidScale DLL = 60% of peak EOD balance.
+#    Consistency rule: no single day > 20% of total profit.
+#    Min 5 days before payout. Max 5 accounts.
+#    Source: lucidtrading.com/plans (verified from screenshots May 2025)
 
 _LUCID_DIRECT_PLANS = [
-    PropFirmPlan(
-        key="lucid_direct_25k",
-        display_name="Lucid Direct 25K",
-        firm="lucid",
-        account_size=25_000,
-        profit_target=0,           # no target — profit share model
-        daily_loss_limit=500,
-        trailing_drawdown=1_000,
-        min_trading_days=0,        # no minimum
-        max_contracts_default=2,
-        is_funded=True,
-        account_type="direct",
-    ),
     PropFirmPlan(
         key="lucid_direct_50k",
         display_name="Lucid Direct 50K",
         firm="lucid",
         account_size=50_000,
-        profit_target=0,
-        daily_loss_limit=1_000,
-        trailing_drawdown=2_000,
-        min_trading_days=0,
-        max_contracts_default=4,
+        profit_target=0,           # no eval target — profit share payout
+        daily_loss_limit=1_200,    # DLL below initial trail confirmed
+        trailing_drawdown=2_000,   # Max Loss Limit confirmed
+        min_trading_days=5,        # Min Day to Payout confirmed
+        max_contracts_default=4,   # 4 Mini OR 40 Micro confirmed
         is_funded=True,
+        eod_drawdown=True,
         account_type="direct",
+        consistency_rule_pct=0.20, # 20% consistency rule confirmed
+        lucidscale_dll=True,       # 60% of Peak EOD Balance above initial trail
     ),
     PropFirmPlan(
         key="lucid_direct_100k",
@@ -188,12 +184,15 @@ _LUCID_DIRECT_PLANS = [
         firm="lucid",
         account_size=100_000,
         profit_target=0,
-        daily_loss_limit=2_000,
-        trailing_drawdown=4_000,
-        min_trading_days=0,
-        max_contracts_default=8,
+        daily_loss_limit=2_100,    # DLL below initial trail confirmed
+        trailing_drawdown=3_500,   # Max Loss Limit confirmed
+        min_trading_days=5,        # Min Day to Payout confirmed
+        max_contracts_default=6,   # 6 Mini OR 60 Micro confirmed
         is_funded=True,
+        eod_drawdown=True,
         account_type="direct",
+        consistency_rule_pct=0.20,
+        lucidscale_dll=True,
     ),
     PropFirmPlan(
         key="lucid_direct_150k",
@@ -201,30 +200,21 @@ _LUCID_DIRECT_PLANS = [
         firm="lucid",
         account_size=150_000,
         profit_target=0,
-        daily_loss_limit=3_000,
-        trailing_drawdown=6_000,
-        min_trading_days=0,
-        max_contracts_default=12,
+        daily_loss_limit=3_000,    # DLL below initial trail confirmed
+        trailing_drawdown=5_000,   # Max Loss Limit confirmed
+        min_trading_days=5,        # Min Day to Payout confirmed
+        max_contracts_default=10,  # 10 Mini OR 100 Micro confirmed
         is_funded=True,
+        eod_drawdown=True,
         account_type="direct",
-    ),
-    PropFirmPlan(
-        key="lucid_direct_250k",
-        display_name="Lucid Direct 250K",
-        firm="lucid",
-        account_size=250_000,
-        profit_target=0,
-        daily_loss_limit=5_000,
-        trailing_drawdown=10_000,
-        min_trading_days=0,
-        max_contracts_default=14,
-        is_funded=True,
-        account_type="direct",
+        consistency_rule_pct=0.20,
+        lucidscale_dll=True,
     ),
 ]
 
-# ── Lucid Pro (evaluation — higher target, tighter DD) ────────────────────────
-#    Rules as of 2025 — verify at lucidtrading.com before trading
+# ── Lucid Pro Eval ─────────────────────────────────────────────────────────────
+#    Has DLL. Drawdown type: EOD. Can pass in as little as 1 day.
+#    Source: lucidtrading.com/plans (verified from screenshots May 2025)
 
 _LUCID_PRO_PLANS = [
     PropFirmPlan(
@@ -232,11 +222,12 @@ _LUCID_PRO_PLANS = [
         display_name="Lucid Pro 50K",
         firm="lucid",
         account_size=50_000,
-        profit_target=4_000,
-        daily_loss_limit=1_000,
-        trailing_drawdown=2_000,
-        min_trading_days=10,
-        max_contracts_default=4,
+        profit_target=3_000,       # confirmed from screenshot
+        daily_loss_limit=1_200,    # DLL confirmed from screenshot
+        trailing_drawdown=2_000,   # Max Loss Limit confirmed
+        min_trading_days=0,        # "Pass in as little as one day"
+        max_contracts_default=4,   # 4 Mini OR 40 Micro
+        eod_drawdown=True,
         account_type="pro",
     ),
     PropFirmPlan(
@@ -244,11 +235,12 @@ _LUCID_PRO_PLANS = [
         display_name="Lucid Pro 100K",
         firm="lucid",
         account_size=100_000,
-        profit_target=8_000,
-        daily_loss_limit=2_000,
-        trailing_drawdown=4_000,
-        min_trading_days=10,
-        max_contracts_default=8,
+        profit_target=6_000,       # confirmed
+        daily_loss_limit=1_800,    # DLL confirmed
+        trailing_drawdown=3_000,   # Max Loss Limit confirmed
+        min_trading_days=0,
+        max_contracts_default=6,   # 6 Mini OR 60 Micro
+        eod_drawdown=True,
         account_type="pro",
     ),
     PropFirmPlan(
@@ -256,18 +248,19 @@ _LUCID_PRO_PLANS = [
         display_name="Lucid Pro 150K",
         firm="lucid",
         account_size=150_000,
-        profit_target=12_000,
-        daily_loss_limit=3_000,
-        trailing_drawdown=6_000,
-        min_trading_days=10,
-        max_contracts_default=12,
+        profit_target=9_000,       # confirmed
+        daily_loss_limit=2_700,    # DLL confirmed
+        trailing_drawdown=4_500,   # Max Loss Limit confirmed
+        min_trading_days=0,
+        max_contracts_default=10,  # 10 Mini OR 100 Micro
+        eod_drawdown=True,
         account_type="pro",
     ),
 ]
 
-# ── Lucid Flex (no daily loss limit) ──────────────────────────────────────────
-#    Daily loss limit removed — only trailing drawdown enforced.
-#    Rules as of 2025 — verify at lucidtrading.com before trading
+# ── Lucid Flex Eval ────────────────────────────────────────────────────────────
+#    NO daily loss limit. Drawdown type: EOD. No consistency rule in funded.
+#    Source: lucidtrading.com/plans (verified from screenshots May 2025)
 
 _LUCID_FLEX_PLANS = [
     PropFirmPlan(
@@ -275,11 +268,12 @@ _LUCID_FLEX_PLANS = [
         display_name="Lucid Flex 50K",
         firm="lucid",
         account_size=50_000,
-        profit_target=3_000,
-        daily_loss_limit=0,        # no daily limit
-        trailing_drawdown=2_000,
-        min_trading_days=10,
-        max_contracts_default=4,
+        profit_target=3_000,       # confirmed
+        daily_loss_limit=0,        # DLL = NONE confirmed
+        trailing_drawdown=2_000,   # Max Loss Limit confirmed
+        min_trading_days=0,
+        max_contracts_default=4,   # 4 Mini OR 40 Micros
+        eod_drawdown=True,
         account_type="flex",
     ),
     PropFirmPlan(
@@ -287,11 +281,12 @@ _LUCID_FLEX_PLANS = [
         display_name="Lucid Flex 100K",
         firm="lucid",
         account_size=100_000,
-        profit_target=6_000,
-        daily_loss_limit=0,
-        trailing_drawdown=4_000,
-        min_trading_days=10,
-        max_contracts_default=8,
+        profit_target=6_000,       # confirmed
+        daily_loss_limit=0,        # DLL = NONE confirmed
+        trailing_drawdown=3_000,   # Max Loss Limit confirmed
+        min_trading_days=0,
+        max_contracts_default=6,   # 6 Mini OR 60 Micros
+        eod_drawdown=True,
         account_type="flex",
     ),
     PropFirmPlan(
@@ -299,11 +294,12 @@ _LUCID_FLEX_PLANS = [
         display_name="Lucid Flex 150K",
         firm="lucid",
         account_size=150_000,
-        profit_target=9_000,
-        daily_loss_limit=0,
-        trailing_drawdown=6_000,
-        min_trading_days=10,
-        max_contracts_default=12,
+        profit_target=9_000,       # confirmed
+        daily_loss_limit=0,        # DLL = NONE confirmed
+        trailing_drawdown=4_500,   # Max Loss Limit confirmed
+        min_trading_days=0,
+        max_contracts_default=10,  # 10 Mini OR 100 Micros
+        eod_drawdown=True,
         account_type="flex",
     ),
 ]
