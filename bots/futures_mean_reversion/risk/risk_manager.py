@@ -68,6 +68,9 @@ class PropFirmRiskManager:
 
     @property
     def daily_loss_limit_breached(self) -> bool:
+        # daily_loss_limit_pct == 0 means Flex/no-daily-limit account — never breach
+        if self.cfg.daily_loss_limit_pct == 0:
+            return False
         limit = self.daily_start_balance * self.cfg.daily_loss_limit_pct
         breached = self.daily_pnl <= -limit
         if breached and not self._daily_loss_alerted:

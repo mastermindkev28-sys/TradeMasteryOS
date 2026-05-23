@@ -75,16 +75,19 @@ YFINANCE_MAP = {
 @dataclass
 class PropFirmPlan:
     """One row per evaluation plan. All dollar amounts are absolute."""
-    key: str                         # e.g. "lucid_25k"
-    display_name: str                # e.g. "Lucid 25K"
-    firm: str                        # "lucid" | "topstep"
+    key: str                         # e.g. "lucid_direct_100k"
+    display_name: str                # e.g. "Lucid Direct 100K"
+    firm: str                        # "lucid" | "topstep" | "apex" | ...
     account_size: float              # starting balance
-    profit_target: float             # dollars to pass eval
-    daily_loss_limit: float          # max intraday loss before auto-flatten
+    profit_target: float             # dollars to pass eval (0 = no target / instant funded)
+    daily_loss_limit: float          # max intraday loss — 0 = no daily limit (e.g. Bulenox Flex)
     trailing_drawdown: float         # max drawdown from equity peak
-    min_trading_days: int            # minimum days before passing
-    max_contracts_default: int       # conservative cap for eval
+    min_trading_days: int            # minimum days before passing (0 = no minimum)
+    max_contracts_default: int       # conservative cap for this account size
     no_overnight_hold: bool = False  # some plans require flat at close
+    is_funded: bool = False          # True = already funded (Direct/Instant), False = evaluation
+    static_drawdown: bool = False    # True = DD from starting balance, False = trailing from peak
+    account_type: str = "standard"   # "standard" | "pro" | "direct" | "flex" | "express" | "mini"
 
 
 # ── Lucid Trading ─────────────────────────────────────────────────────────────
@@ -145,6 +148,163 @@ _LUCID_PLANS = [
         trailing_drawdown=6_000,
         min_trading_days=10,
         max_contracts_default=12,
+    ),
+]
+
+# ── Lucid Direct (Instant Funded) ─────────────────────────────────────────────
+#    No evaluation — live capital from day one. Profit split model (no fixed target).
+#    Rules as of 2025 — verify at lucidtrading.com before trading
+
+_LUCID_DIRECT_PLANS = [
+    PropFirmPlan(
+        key="lucid_direct_25k",
+        display_name="Lucid Direct 25K",
+        firm="lucid",
+        account_size=25_000,
+        profit_target=0,           # no target — profit share model
+        daily_loss_limit=500,
+        trailing_drawdown=1_000,
+        min_trading_days=0,        # no minimum
+        max_contracts_default=2,
+        is_funded=True,
+        account_type="direct",
+    ),
+    PropFirmPlan(
+        key="lucid_direct_50k",
+        display_name="Lucid Direct 50K",
+        firm="lucid",
+        account_size=50_000,
+        profit_target=0,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=0,
+        max_contracts_default=4,
+        is_funded=True,
+        account_type="direct",
+    ),
+    PropFirmPlan(
+        key="lucid_direct_100k",
+        display_name="Lucid Direct 100K",
+        firm="lucid",
+        account_size=100_000,
+        profit_target=0,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=0,
+        max_contracts_default=8,
+        is_funded=True,
+        account_type="direct",
+    ),
+    PropFirmPlan(
+        key="lucid_direct_150k",
+        display_name="Lucid Direct 150K",
+        firm="lucid",
+        account_size=150_000,
+        profit_target=0,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=0,
+        max_contracts_default=12,
+        is_funded=True,
+        account_type="direct",
+    ),
+    PropFirmPlan(
+        key="lucid_direct_250k",
+        display_name="Lucid Direct 250K",
+        firm="lucid",
+        account_size=250_000,
+        profit_target=0,
+        daily_loss_limit=5_000,
+        trailing_drawdown=10_000,
+        min_trading_days=0,
+        max_contracts_default=14,
+        is_funded=True,
+        account_type="direct",
+    ),
+]
+
+# ── Lucid Pro (evaluation — higher target, tighter DD) ────────────────────────
+#    Rules as of 2025 — verify at lucidtrading.com before trading
+
+_LUCID_PRO_PLANS = [
+    PropFirmPlan(
+        key="lucid_pro_50k",
+        display_name="Lucid Pro 50K",
+        firm="lucid",
+        account_size=50_000,
+        profit_target=4_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+        account_type="pro",
+    ),
+    PropFirmPlan(
+        key="lucid_pro_100k",
+        display_name="Lucid Pro 100K",
+        firm="lucid",
+        account_size=100_000,
+        profit_target=8_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=10,
+        max_contracts_default=8,
+        account_type="pro",
+    ),
+    PropFirmPlan(
+        key="lucid_pro_150k",
+        display_name="Lucid Pro 150K",
+        firm="lucid",
+        account_size=150_000,
+        profit_target=12_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=10,
+        max_contracts_default=12,
+        account_type="pro",
+    ),
+]
+
+# ── Lucid Flex (no daily loss limit) ──────────────────────────────────────────
+#    Daily loss limit removed — only trailing drawdown enforced.
+#    Rules as of 2025 — verify at lucidtrading.com before trading
+
+_LUCID_FLEX_PLANS = [
+    PropFirmPlan(
+        key="lucid_flex_50k",
+        display_name="Lucid Flex 50K",
+        firm="lucid",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=0,        # no daily limit
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+        account_type="flex",
+    ),
+    PropFirmPlan(
+        key="lucid_flex_100k",
+        display_name="Lucid Flex 100K",
+        firm="lucid",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=0,
+        trailing_drawdown=4_000,
+        min_trading_days=10,
+        max_contracts_default=8,
+        account_type="flex",
+    ),
+    PropFirmPlan(
+        key="lucid_flex_150k",
+        display_name="Lucid Flex 150K",
+        firm="lucid",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=0,
+        trailing_drawdown=6_000,
+        min_trading_days=10,
+        max_contracts_default=12,
+        account_type="flex",
     ),
 ]
 
@@ -399,7 +559,53 @@ _E2T_PLANS = [
     ),
 ]
 
-# ── Bulenox ───────────────────────────────────────────────────────────────────
+# ── Apex Pro ──────────────────────────────────────────────────────────────────
+#    Static drawdown from starting balance (easier to protect than trailing).
+#    Higher profit target vs standard. Verify at apextraderfunding.com.
+
+_APEX_PRO_PLANS = [
+    PropFirmPlan(
+        key="apex_pro_50k",
+        display_name="Apex Pro 50K",
+        firm="apex",
+        account_size=50_000,
+        profit_target=4_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_500,
+        min_trading_days=7,
+        max_contracts_default=4,
+        static_drawdown=True,
+        account_type="pro",
+    ),
+    PropFirmPlan(
+        key="apex_pro_100k",
+        display_name="Apex Pro 100K",
+        firm="apex",
+        account_size=100_000,
+        profit_target=8_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=3_000,
+        min_trading_days=7,
+        max_contracts_default=8,
+        static_drawdown=True,
+        account_type="pro",
+    ),
+    PropFirmPlan(
+        key="apex_pro_150k",
+        display_name="Apex Pro 150K",
+        firm="apex",
+        account_size=150_000,
+        profit_target=12_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=5_000,
+        min_trading_days=7,
+        max_contracts_default=12,
+        static_drawdown=True,
+        account_type="pro",
+    ),
+]
+
+# ── Bulenox Standard ──────────────────────────────────────────────────────────
 #    Rules as of 2025 — verify at bulenox.com before trading
 
 _BULENOX_PLANS = [
@@ -438,15 +644,136 @@ _BULENOX_PLANS = [
     ),
 ]
 
+# ── Bulenox Flex (no daily loss limit) ────────────────────────────────────────
+#    Daily loss limit disabled — only trailing drawdown applies.
+
+_BULENOX_FLEX_PLANS = [
+    PropFirmPlan(
+        key="bulenox_flex_50k",
+        display_name="Bulenox Flex 50K",
+        firm="bulenox",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=0,        # no daily limit
+        trailing_drawdown=2_000,
+        min_trading_days=5,
+        max_contracts_default=4,
+        account_type="flex",
+    ),
+    PropFirmPlan(
+        key="bulenox_flex_100k",
+        display_name="Bulenox Flex 100K",
+        firm="bulenox",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=0,
+        trailing_drawdown=4_000,
+        min_trading_days=5,
+        max_contracts_default=8,
+        account_type="flex",
+    ),
+    PropFirmPlan(
+        key="bulenox_flex_150k",
+        display_name="Bulenox Flex 150K",
+        firm="bulenox",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=0,
+        trailing_drawdown=6_000,
+        min_trading_days=5,
+        max_contracts_default=12,
+        account_type="flex",
+    ),
+]
+
+# ── TopStep Express ───────────────────────────────────────────────────────────
+#    Faster challenge: steeper profit target, fewer min days.
+
+_TOPSTEP_EXPRESS_PLANS = [
+    PropFirmPlan(
+        key="topstep_express_50k",
+        display_name="TopStep Express 50K",
+        firm="topstep",
+        account_size=50_000,
+        profit_target=4_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=5,
+        max_contracts_default=4,
+        account_type="express",
+    ),
+    PropFirmPlan(
+        key="topstep_express_100k",
+        display_name="TopStep Express 100K",
+        firm="topstep",
+        account_size=100_000,
+        profit_target=8_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=3_000,
+        min_trading_days=5,
+        max_contracts_default=8,
+        account_type="express",
+    ),
+    PropFirmPlan(
+        key="topstep_express_150k",
+        display_name="TopStep Express 150K",
+        firm="topstep",
+        account_size=150_000,
+        profit_target=12_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=4_500,
+        min_trading_days=5,
+        max_contracts_default=12,
+        account_type="express",
+    ),
+]
+
+# ── Earn2Trade Gauntlet Mini ──────────────────────────────────────────────────
+#    Smaller/quicker challenge variant. Verify at earn2trade.com.
+
+_E2T_MINI_PLANS = [
+    PropFirmPlan(
+        key="e2t_mini_25k",
+        display_name="Earn2Trade Gauntlet Mini 25K",
+        firm="earn2trade",
+        account_size=25_000,
+        profit_target=1_250,
+        daily_loss_limit=500,
+        trailing_drawdown=1_500,
+        min_trading_days=10,
+        max_contracts_default=2,
+        account_type="mini",
+    ),
+    PropFirmPlan(
+        key="e2t_mini_50k",
+        display_name="Earn2Trade Gauntlet Mini 50K",
+        firm="earn2trade",
+        account_size=50_000,
+        profit_target=2_500,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+        account_type="mini",
+    ),
+]
+
 PROP_FIRM_PLANS: dict[str, PropFirmPlan] = {
     p.key: p for p in (
         _LUCID_PLANS
+        + _LUCID_DIRECT_PLANS
+        + _LUCID_PRO_PLANS
+        + _LUCID_FLEX_PLANS
         + _TOPSTEP_PLANS
+        + _TOPSTEP_EXPRESS_PLANS
         + _APEX_PLANS
+        + _APEX_PRO_PLANS
         + _MFF_PLANS
         + _TPT_PLANS
         + _E2T_PLANS
+        + _E2T_MINI_PLANS
         + _BULENOX_PLANS
+        + _BULENOX_FLEX_PLANS
     )
 }
 
