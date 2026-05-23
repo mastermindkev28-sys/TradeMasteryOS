@@ -1,10 +1,14 @@
 """
 TradeMasteryOS — Futures Mean Reversion Bot
-Supports all Lucid Trading and TopStep evaluation plans.
+Supports Lucid Trading, TopStep, Apex Trader Funding, MyFundedFutures,
+Take Profit Trader, and Earn2Trade (Gauntlet) evaluation plans.
 
 Select your plan via env var or CLI:
-  PROP_FIRM_PLAN=topstep_100k python scanner.py
-  python scanner.py --plan lucid_50k
+  PROP_FIRM_PLAN=apex_100k python scanner.py
+  python scanner.py --plan topstep_150k
+  python scanner.py --list-plans
+
+⚠️  Rules change — always verify at each firm's website before trading.
 """
 
 from dataclasses import dataclass, field
@@ -183,8 +187,267 @@ _TOPSTEP_PLANS = [
     ),
 ]
 
+# ── Apex Trader Funding ───────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at apextraderfunding.com before trading
+#    Note: Apex has NO daily loss limit in funded phase; using eval-phase limits here.
+
+_APEX_PLANS = [
+    PropFirmPlan(
+        key="apex_25k",
+        display_name="Apex 25K",
+        firm="apex",
+        account_size=25_000,
+        profit_target=1_500,
+        daily_loss_limit=500,
+        trailing_drawdown=1_500,
+        min_trading_days=7,
+        max_contracts_default=2,
+    ),
+    PropFirmPlan(
+        key="apex_50k",
+        display_name="Apex 50K",
+        firm="apex",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_500,
+        min_trading_days=7,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="apex_75k",
+        display_name="Apex 75K",
+        firm="apex",
+        account_size=75_000,
+        profit_target=4_250,
+        daily_loss_limit=1_500,
+        trailing_drawdown=2_750,
+        min_trading_days=7,
+        max_contracts_default=6,
+    ),
+    PropFirmPlan(
+        key="apex_100k",
+        display_name="Apex 100K",
+        firm="apex",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=3_000,
+        min_trading_days=7,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="apex_150k",
+        display_name="Apex 150K",
+        firm="apex",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=5_000,
+        min_trading_days=7,
+        max_contracts_default=12,
+    ),
+    PropFirmPlan(
+        key="apex_250k",
+        display_name="Apex 250K",
+        firm="apex",
+        account_size=250_000,
+        profit_target=15_000,
+        daily_loss_limit=5_000,
+        trailing_drawdown=6_500,
+        min_trading_days=7,
+        max_contracts_default=14,
+    ),
+    PropFirmPlan(
+        key="apex_300k",
+        display_name="Apex 300K",
+        firm="apex",
+        account_size=300_000,
+        profit_target=20_000,
+        daily_loss_limit=6_000,
+        trailing_drawdown=7_500,
+        min_trading_days=7,
+        max_contracts_default=17,
+    ),
+]
+
+# ── MyFundedFutures ───────────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at myfundedfutures.com before trading
+
+_MFF_PLANS = [
+    PropFirmPlan(
+        key="mff_50k",
+        display_name="MyFundedFutures 50K",
+        firm="myfundedfutures",
+        account_size=50_000,
+        profit_target=4_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="mff_100k",
+        display_name="MyFundedFutures 100K",
+        firm="myfundedfutures",
+        account_size=100_000,
+        profit_target=8_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=10,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="mff_150k",
+        display_name="MyFundedFutures 150K",
+        firm="myfundedfutures",
+        account_size=150_000,
+        profit_target=12_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=10,
+        max_contracts_default=12,
+    ),
+]
+
+# ── Take Profit Trader ────────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at takeprofittrader.com before trading
+
+_TPT_PLANS = [
+    PropFirmPlan(
+        key="tpt_50k",
+        display_name="Take Profit Trader 50K",
+        firm="takeprofittrader",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=10,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="tpt_100k",
+        display_name="Take Profit Trader 100K",
+        firm="takeprofittrader",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=3_500,
+        min_trading_days=10,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="tpt_150k",
+        display_name="Take Profit Trader 150K",
+        firm="takeprofittrader",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=5_000,
+        min_trading_days=10,
+        max_contracts_default=12,
+    ),
+]
+
+# ── Earn2Trade (Gauntlet Mini) ────────────────────────────────────────────────
+#    Rules as of 2025 — verify at earn2trade.com before trading
+
+_E2T_PLANS = [
+    PropFirmPlan(
+        key="e2t_25k",
+        display_name="Earn2Trade Gauntlet 25K",
+        firm="earn2trade",
+        account_size=25_000,
+        profit_target=1_500,
+        daily_loss_limit=500,
+        trailing_drawdown=1_500,
+        min_trading_days=15,
+        max_contracts_default=2,
+    ),
+    PropFirmPlan(
+        key="e2t_50k",
+        display_name="Earn2Trade Gauntlet 50K",
+        firm="earn2trade",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=15,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="e2t_100k",
+        display_name="Earn2Trade Gauntlet 100K",
+        firm="earn2trade",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=15,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="e2t_150k",
+        display_name="Earn2Trade Gauntlet 150K",
+        firm="earn2trade",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=15,
+        max_contracts_default=12,
+    ),
+]
+
+# ── Bulenox ───────────────────────────────────────────────────────────────────
+#    Rules as of 2025 — verify at bulenox.com before trading
+
+_BULENOX_PLANS = [
+    PropFirmPlan(
+        key="bulenox_50k",
+        display_name="Bulenox 50K",
+        firm="bulenox",
+        account_size=50_000,
+        profit_target=3_000,
+        daily_loss_limit=1_000,
+        trailing_drawdown=2_000,
+        min_trading_days=5,
+        max_contracts_default=4,
+    ),
+    PropFirmPlan(
+        key="bulenox_100k",
+        display_name="Bulenox 100K",
+        firm="bulenox",
+        account_size=100_000,
+        profit_target=6_000,
+        daily_loss_limit=2_000,
+        trailing_drawdown=4_000,
+        min_trading_days=5,
+        max_contracts_default=8,
+    ),
+    PropFirmPlan(
+        key="bulenox_150k",
+        display_name="Bulenox 150K",
+        firm="bulenox",
+        account_size=150_000,
+        profit_target=9_000,
+        daily_loss_limit=3_000,
+        trailing_drawdown=6_000,
+        min_trading_days=5,
+        max_contracts_default=12,
+    ),
+]
+
 PROP_FIRM_PLANS: dict[str, PropFirmPlan] = {
-    p.key: p for p in _LUCID_PLANS + _TOPSTEP_PLANS
+    p.key: p for p in (
+        _LUCID_PLANS
+        + _TOPSTEP_PLANS
+        + _APEX_PLANS
+        + _MFF_PLANS
+        + _TPT_PLANS
+        + _E2T_PLANS
+        + _BULENOX_PLANS
+    )
 }
 
 DEFAULT_PLAN_KEY = os.getenv("PROP_FIRM_PLAN", "lucid_25k")
