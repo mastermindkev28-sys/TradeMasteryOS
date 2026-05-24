@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import CONFIG
 from scanner import scan_symbol, format_telegram_message
+from ict_scanner import scan_ict
 from live.telegram_alerts import TelegramAlerter
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
@@ -127,25 +128,54 @@ def send_test():
 
 # ── Scheduler setup ───────────────────────────────────────────────────────────
 
+def run_ict_scan():
+    """Run ICT NY Kill Zone scan at 9:25 AM ET and send Telegram alert."""
+    now_pt = datetime.now(PACIFIC)
+    if now_pt.weekday() >= 5:
+        return
+
+    logger.info(f"=== ICT NY Kill Zone scan [{now_pt.strftime('%a %b %d %I:%M %p PT')}] ===")
+
+    for symbol in CONFIG.scan_symbols:
+        try:
+            sig, msg = scan_ict(symbol)
+            alerter = TelegramAlerter(CONFIG.telegram)
+            sent = alerter._send(msg)
+            if sent:
+                logger.info(f"ICT {symbol}: Telegram sent ✅")
+            else:
+                logger.warning(f"ICT {symbol}: Telegram failed")
+                logger.info("\n" + msg)
+        except Exception as e:
+            logger.error(f"ICT scan error for {symbol}: {e}")
+
+
 def setup_schedule():
     """
-    Schedule daily scan at 6:00 AM Pacific, Mon–Fri only.
-    schedule library runs in local time; we convert 6am PT → local wall clock.
-    Since launchd runs the process, we keep it simple: schedule at 06:00 and
-    gate on weekday inside run_scan().
-    """
-    # Daily scan Mon–Fri at 06:00 AM PT
-    # We schedule every day and skip weekends inside run_scan()
-    schedule.every().monday.at("06:00").do(run_scan)
-    schedule.every().tuesday.at("06:00").do(run_scan)
-    schedule.every().wednesday.at("06:00").do(run_scan)
-    schedule.every().thursday.at("06:00").do(run_scan)
-    schedule.every().friday.at("06:00").do(run_scan)
+    Two daily jobs Mon–Fri:
+      6:00 AM PT  — IBS mean reversion scan (overnight signal, next-day entry)
+      9:25 AM ET  — ICT NY Kill Zone scan (intraday setup for 9:30 open)
 
-    # Weekly heartbeat Sunday at 8:00 PM PT
+    9:25 AM ET = 6:25 AM PT (standard time) | 6:25 AM PT (same during DST)
+    We run both on PT clock; ET offset handled by scheduling 6:25 AM PT.
+    """
+    # IBS scan — 6:00 AM PT Mon–Fri
+    for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
+        getattr(schedule.every(), day).at("06:00").do(run_scan)
+
+    # ICT scan — 6:25 AM PT (= 9:25 AM ET) Mon–Fri
+    for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
+        getattr(schedule.every(), day).at("06:25").do(run_ict_scan)
+
+    # Weekly heartbeat Sunday 8:00 PM PT
     schedule.every().sunday.at("20:00").do(send_heartbeat)
 
-    logger.info("Schedule set: scan Mon–Fri at 6:00 AM PT | heartbeat Sun 8:00 PM PT")
+    logger.info(
+        "Schedule set:\n"
+        "  6:00 AM PT Mon–Fri → IBS mean reversion scan\n"
+        "  6:25 AM PT Mon–Fri → ICT NY Kill Zone scan\n"
+        "  8:00 PM PT Sunday  → weekly heartbeat"
+    )
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -169,8 +199,9 @@ def main():
     setup_schedule()
 
     if args.now:
-        logger.info("--now flag: running immediate scan...")
+        logger.info("--now flag: running immediate IBS + ICT scans...")
         run_scan()
+        run_ict_scan()
 
     # Main loop — check schedule every 30 seconds
     while True:
