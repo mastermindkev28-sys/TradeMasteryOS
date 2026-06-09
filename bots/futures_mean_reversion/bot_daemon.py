@@ -1,12 +1,15 @@
 """
 TradeMastery Bot Daemon
 ========================
-Runs 24/7 Mon-Fri. Sends a signal scan to Telegram every morning at 6:00 AM PST.
-Also sends a heartbeat every Sunday night so you know it's alive.
+Runs 24/7 Mon-Fri. Three scan engines run each trading day:
+
+  6:00 AM PT  — IBS mean reversion scan     (overnight signal, next-day open entry)
+  6:25 AM PT  — ICT NY Kill Zone scan        (9:25 AM ET, A+ intraday setups)
+  9:35–10:50 ET — ORB + VWAP MR intraday    (polls every 5 min, one alert per signal/day)
 
 Usage:
     python3 bot_daemon.py              # start daemon (blocks — use launchd to manage)
-    python3 bot_daemon.py --now        # fire a scan immediately then keep running
+    python3 bot_daemon.py --now        # fire all scans immediately then keep running
     python3 bot_daemon.py --test       # send a test Telegram message and exit
 
 Managed by launchd on Mac (see com.trademastery.bot.plist).
@@ -34,10 +37,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import CONFIG
 from scanner import scan_symbol, format_telegram_message
 from ict_scanner import scan_ict
+from orb_vwap_scanner import run_orb_vwap_scan, reset_orb_vwap_state
 from live.telegram_alerts import TelegramAlerter
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
-PACIFIC = ZoneInfo("America/Los_Angeles")   # handles PST/PDT automatically
+PACIFIC  = ZoneInfo("America/Los_Angeles")
+EASTERN  = ZoneInfo("America/New_York")
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).parent / "logs"
@@ -152,37 +157,77 @@ def run_ict_scan():
 
 def setup_schedule():
     """
-    Two daily jobs Mon–Fri:
-      6:00 AM PT  — IBS mean reversion scan (overnight signal, next-day entry)
-      9:25 AM ET  — ICT NY Kill Zone scan (intraday setup for 9:30 open)
-
-    9:25 AM ET = 6:25 AM PT (standard time) | 6:25 AM PT (same during DST)
-    We run both on PT clock; ET offset handled by scheduling 6:25 AM PT.
+    Three scan engines Mon–Fri:
+      6:00 AM PT  — IBS mean reversion (overnight signal, next-day open entry)
+      6:25 AM PT  — ICT NY Kill Zone   (= 9:25 AM ET, A+ intraday setups)
+      Main loop   — ORB + VWAP MR polls every 5 min during 9:35–10:50 ET
     """
-    # IBS scan — 6:00 AM PT Mon–Fri
     for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
         getattr(schedule.every(), day).at("06:00").do(run_scan)
-
-    # ICT scan — 6:25 AM PT (= 9:25 AM ET) Mon–Fri
-    for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
         getattr(schedule.every(), day).at("06:25").do(run_ict_scan)
 
-    # Weekly heartbeat Sunday 8:00 PM PT
     schedule.every().sunday.at("20:00").do(send_heartbeat)
 
     logger.info(
         "Schedule set:\n"
         "  6:00 AM PT Mon–Fri → IBS mean reversion scan\n"
         "  6:25 AM PT Mon–Fri → ICT NY Kill Zone scan\n"
+        "  9:35–10:50 ET daily → ORB + VWAP MR polls (5-min loop)\n"
         "  8:00 PM PT Sunday  → weekly heartbeat"
     )
+
+
+# ── Intraday polling — ORB + VWAP MR ─────────────────────────────────────────
+
+_last_orb_poll_minute: int = -1   # track last minute we ran the intraday scan
+
+
+def maybe_run_intraday_scan():
+    """
+    Called from the main loop every 30 s.
+    Fires the ORB + VWAP MR scanner at :00 and :30 of each 5-minute block
+    between 9:35 and 10:50 ET, Mon–Fri.
+    """
+    global _last_orb_poll_minute
+
+    now_et = datetime.now(EASTERN)
+
+    # Weekday only
+    if now_et.weekday() >= 5:
+        return
+
+    # Reset dedup state at market open each morning
+    if now_et.hour == 9 and now_et.minute == 30 and now_et.second < 35:
+        reset_orb_vwap_state()
+        return
+
+    # Session window: 9:35–10:50 ET
+    session_open  = now_et.replace(hour=9,  minute=35, second=0, microsecond=0)
+    session_close = now_et.replace(hour=10, minute=50, second=0, microsecond=0)
+    if not (session_open <= now_et <= session_close):
+        return
+
+    # Fire on every 5th minute (9:35, 9:40, 9:45 … 10:50)
+    if now_et.minute % 5 != 0:
+        return
+
+    # Deduplicate within the same minute
+    if now_et.minute == _last_orb_poll_minute:
+        return
+    _last_orb_poll_minute = now_et.minute
+
+    logger.info(f"=== ORB+VWAP MR poll [{now_et.strftime('%I:%M %p ET')}] ===")
+    try:
+        run_orb_vwap_scan()
+    except Exception as e:
+        logger.error(f"ORB+VWAP scan error: {e}")
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="TradeMastery Bot Daemon")
-    parser.add_argument("--now", action="store_true", help="Run a scan immediately then keep running")
+    parser.add_argument("--now", action="store_true", help="Run all scans immediately then keep running")
     parser.add_argument("--test", action="store_true", help="Send test Telegram message and exit")
     args = parser.parse_args()
 
@@ -193,19 +238,21 @@ def main():
     logger.info("  TradeMastery Bot Daemon starting")
     logger.info(f"  Plan    : {CONFIG.plan.display_name}")
     logger.info(f"  Symbols : {', '.join(CONFIG.scan_symbols)}")
-    logger.info(f"  Schedule: Mon–Fri 6:00 AM PT")
+    logger.info(f"  Engines : IBS @ 6:00 PT | ICT @ 6:25 PT | ORB+VWAP 9:35-10:50 ET")
     logger.info("=" * 55)
 
     setup_schedule()
 
     if args.now:
-        logger.info("--now flag: running immediate IBS + ICT scans...")
+        logger.info("--now flag: running immediate IBS + ICT + ORB+VWAP scans...")
         run_scan()
         run_ict_scan()
+        run_orb_vwap_scan()
 
-    # Main loop — check schedule every 30 seconds
+    # Main loop — schedule checks every 30 s, intraday poll wired in
     while True:
         schedule.run_pending()
+        maybe_run_intraday_scan()
         time.sleep(30)
 
 
