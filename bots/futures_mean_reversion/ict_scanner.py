@@ -174,6 +174,13 @@ def format_ict_signal(symbol: str, sig: ICTSignal, cfg=CONFIG) -> str:
         f"📉 Daily limit: `${plan.daily_loss_limit:,.0f}`  |  Trail DD: `${plan.trailing_drawdown:,.0f}`",
     ]
 
+    if cfg.sprint_mode:
+        lines += [
+            "",
+            f"⚡ *SPRINT MODE*  |  Score threshold: `{cfg.ict_min_score}/10`",
+            f"⚠️ Hard daily loss cap: `${cfg.sprint_daily_loss_cap:,.0f}`  — stop ALL trading if hit",
+        ]
+
     return "\n".join(lines)
 
 
@@ -199,7 +206,7 @@ def scan_ict(symbol: str) -> tuple[ICTSignal, str]:
         if secondary is None:
             logger.warning(f"SMT secondary ({smt_partner}) unavailable — scoring without it")
 
-    strategy = ICTNYKillzone(ICTNYKillzoneConfig())
+    strategy = ICTNYKillzone(ICTNYKillzoneConfig(min_score=CONFIG.ict_min_score))
     sig = strategy.get_signal(intraday, daily, secondary_df=secondary)
 
     logger.info(

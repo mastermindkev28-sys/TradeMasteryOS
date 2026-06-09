@@ -239,6 +239,8 @@ def main():
     logger.info(f"  Plan    : {CONFIG.plan.display_name}")
     logger.info(f"  Symbols : {', '.join(CONFIG.scan_symbols)}")
     logger.info(f"  Engines : IBS @ 6:00 PT | ICT @ 6:25 PT | ORB+VWAP 9:35-10:50 ET")
+    if CONFIG.sprint_mode:
+        logger.info(f"  ⚡ SPRINT MODE  ICT min score: {CONFIG.ict_min_score}/10  Daily cap: ${CONFIG.sprint_daily_loss_cap:,.0f}")
     logger.info("=" * 55)
 
     setup_schedule()

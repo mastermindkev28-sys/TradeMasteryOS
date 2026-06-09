@@ -915,6 +915,20 @@ class Config:
     # Active plan — applied at startup
     plan: PropFirmPlan = field(default_factory=get_plan)
 
+    # Sprint mode — lowers ICT score threshold 8→7 for more signals
+    # Enable with SPRINT_MODE=true in .env when you need to pass faster
+    sprint_mode: bool = os.getenv("SPRINT_MODE", "false").lower() in ("true", "1", "yes")
+
+    @property
+    def ict_min_score(self) -> int:
+        """ICT A+ minimum score: 7 in sprint mode, 8 standard."""
+        return 7 if self.sprint_mode else 8
+
+    @property
+    def sprint_daily_loss_cap(self) -> float:
+        """Conservative daily loss cap during sprint to protect the DD buffer."""
+        return 600.0 if self.sprint_mode else float(self.plan.daily_loss_limit)
+
     def apply_plan(self, plan_key: str | None = None) -> "Config":
         """Swap to a different plan at runtime (e.g. from CLI --plan arg)."""
         self.plan = get_plan(plan_key)

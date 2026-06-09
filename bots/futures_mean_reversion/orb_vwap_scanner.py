@@ -118,8 +118,14 @@ def format_orb_signal(symbol: str, sig: ORBSignal, cfg=CONFIG) -> str:
         f"🏦 *{plan.display_name}*  |  Max: `{plan.max_contracts_default}` contracts",
         f"📉 Daily limit: `${plan.daily_loss_limit:,.0f}`  |  Trail DD: `${plan.trailing_drawdown:,.0f}`",
         "",
-        "⚠️ _TP1 = scale 50% out. Move stop to breakeven. Let TP2 run._",
     ]
+    if cfg.sprint_mode:
+        lines += [
+            f"⚡ *SPRINT MODE* — run full `{plan.max_contracts_default}` contracts to TP2. No scale-out.",
+            f"⚠️ Hard daily cap: `${cfg.sprint_daily_loss_cap:,.0f}` — stop ALL trading if hit today",
+        ]
+    else:
+        lines.append("⚠️ _TP1 = scale 50% out. Move stop to breakeven. Let TP2 run._")
     return "\n".join(lines)
 
 
@@ -162,8 +168,14 @@ def format_vwap_mr_signal(symbol: str, sig: VWAPMRSignal, cfg=CONFIG) -> str:
         f"🏦 *{plan.display_name}*  |  Max: `{plan.max_contracts_default}` contracts",
         f"📉 Daily limit: `${plan.daily_loss_limit:,.0f}`  |  Trail DD: `${plan.trailing_drawdown:,.0f}`",
         "",
-        "⚠️ _Mean reversion — exit AT VWAP. Do not hold through._",
     ]
+    if cfg.sprint_mode:
+        lines += [
+            f"⚡ *SPRINT MODE* — `{plan.max_contracts_default}` contracts. Exit at VWAP.",
+            f"⚠️ Hard daily cap: `${cfg.sprint_daily_loss_cap:,.0f}` — stop ALL trading if hit today",
+        ]
+    else:
+        lines.append("⚠️ _Mean reversion — exit AT VWAP. Do not hold through._")
     return "\n".join(lines)
 
 
