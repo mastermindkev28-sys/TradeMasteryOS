@@ -10,16 +10,20 @@ interface SubscriptionData {
   current_period_end: string | null;
 }
 
+const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+
 export default function SubscriptionGuard({ children }: { children: React.ReactNode }) {
   const { session, loading: authLoading } = useSupabaseAuth();
   const router = useRouter();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [subLoading, setSubLoading] = useState(true);
 
+  const isAdmin = !!session?.user?.email && ADMIN_EMAILS.includes(session.user.email.toLowerCase());
+
   useEffect(() => {
     if (authLoading) return;
 
-    if (!session) {
+    if (!session || isAdmin) {
       setSubLoading(false);
       return;
     }
@@ -40,16 +44,16 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
     };
 
     fetchSubscription();
-  }, [session, authLoading]);
+  }, [session, authLoading, isAdmin]);
 
   useEffect(() => {
-    if (!authLoading && !subLoading) {
+    if (!authLoading && !subLoading && !isAdmin) {
       const isActive = subscription?.status === 'active';
       if (!isActive) {
         router.replace('/pricing');
       }
     }
-  }, [authLoading, subLoading, subscription, router]);
+  }, [authLoading, subLoading, subscription, router, isAdmin]);
 
   if (authLoading || subLoading) {
     return (
@@ -59,7 +63,7 @@ export default function SubscriptionGuard({ children }: { children: React.ReactN
     );
   }
 
-  if (subscription?.status !== 'active') {
+  if (!isAdmin && subscription?.status !== 'active') {
     return null;
   }
 
