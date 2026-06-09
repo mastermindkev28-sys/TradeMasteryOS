@@ -21,7 +21,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/Library/Frameworks/Python.framework/Versions/3.12/bin/python3</string>
         <string>/Users/kev/Desktop/Quant-PF-Signals-Bot/bot_daemon.py</string>
     </array>
 
