@@ -48,9 +48,10 @@ echo "✅  run_scanner.sh is executable."
 # ── 4. Create .env if missing ─────────────────────────────────────────────────
 if [[ ! -f "$BOT_DIR/.env" ]]; then
   cat > "$BOT_DIR/.env" << 'EOF'
-PROP_FIRM_PLAN=lucid_25k
+PROP_FIRM_PLAN=lucid_pro_50k
 TELEGRAM_BOT_TOKEN=8885775511:AAHIaBroM6Zv2mi4FIIiW95UYr4bR7WDmgk
 TELEGRAM_CHAT_ID=8002213236
+SPRINT_MODE=true
 EOF
   echo "✅  .env created."
 else

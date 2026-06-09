@@ -29,11 +29,13 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PROP_FIRM_PLAN</key>
-        <string>lucid_direct_100k</string>
+        <string>lucid_pro_50k</string>
         <key>TELEGRAM_BOT_TOKEN</key>
         <string>8885775511:AAHIaBroM6Zv2mi4FIIiW95UYr4bR7WDmgk</string>
         <key>TELEGRAM_CHAT_ID</key>
         <string>8002213236</string>
+        <key>SPRINT_MODE</key>
+        <string>true</string>
     </dict>
 
     <key>WorkingDirectory</key>
