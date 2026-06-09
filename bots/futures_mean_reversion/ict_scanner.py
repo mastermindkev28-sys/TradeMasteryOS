@@ -25,6 +25,13 @@ from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP
 from strategy.ict_ny_killzone import ICTNYKillzone, ICTNYKillzoneConfig, ICTSignal
 from live.telegram_alerts import TelegramAlerter
 
+# SMT divergence pairs: primary → secondary instrument for cross-market confirmation
+SMT_PAIRS: dict[str, str] = {
+    "MNQ": "MES",   # Nasdaq Mini → S&P500 Mini
+    "MES": "MNQ",
+    "MGC": "GC=F",  # Micro Gold → full Gold
+}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -137,7 +144,11 @@ def format_ict_signal(symbol: str, sig: ICTSignal, cfg=CONFIG) -> str:
         "",
         f"📐 *Setup*",
         f"  Type:   `{sig.setup_type.upper()}`",
+        f"  Score:  `{sig.score.total}/10` ({sig.score.grade})" if sig.score else "",
     ]
+
+    if sig.score:
+        lines.append(f"```\n{sig.score.breakdown()}\n```")
 
     if sig.judas:
         swept = "PDH" if sig.judas.direction == "bearish" else "PDL"
@@ -180,12 +191,20 @@ def scan_ict(symbol: str) -> tuple[ICTSignal, str]:
         sig = ICTSignal(direction="no_setup", reason="Data fetch failed")
         return sig, f"⚠️ *{symbol}* — data fetch failed"
 
+    # Fetch secondary instrument for SMT divergence
+    secondary = None
+    smt_partner = SMT_PAIRS.get(symbol)
+    if smt_partner:
+        secondary = fetch_intraday(smt_partner)
+        if secondary is None:
+            logger.warning(f"SMT secondary ({smt_partner}) unavailable — scoring without it")
+
     strategy = ICTNYKillzone(ICTNYKillzoneConfig())
-    sig = strategy.get_signal(intraday, daily)
+    sig = strategy.get_signal(intraday, daily, secondary_df=secondary)
 
     logger.info(
         f"{symbol}: direction={sig.direction}  "
-        f"{'entry=' + str(sig.entry) if sig.is_valid else sig.reason[:60]}"
+        f"{'entry=' + str(sig.entry) + '  score=' + str(sig.score.total) + '/10' if sig.is_valid else sig.reason[:60]}"
     )
 
     msg = format_ict_signal(symbol, sig, CONFIG)
