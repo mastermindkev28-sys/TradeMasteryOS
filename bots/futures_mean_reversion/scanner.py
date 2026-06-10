@@ -51,6 +51,8 @@ def fetch_bars(symbol: str, n: int = 350):
                          auto_adjust=True, progress=False)
         if df.empty:
             return None
+        if hasattr(df.columns, "levels"):
+            df.columns = df.columns.get_level_values(0)
         df.columns = [c.lower() for c in df.columns]
         return df[["open", "high", "low", "close", "volume"]].dropna().tail(n)
     except Exception as e:

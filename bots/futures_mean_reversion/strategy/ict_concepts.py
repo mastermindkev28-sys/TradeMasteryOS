@@ -327,7 +327,7 @@ def detect_mss(
 # ─── Previous Day Levels ──────────────────────────────────────────────────────
 
 def get_prev_day_levels(daily_df: pd.DataFrame, trade_date) -> Optional[PrevDayLevels]:
-    prior = daily_df[daily_df.index.normalize() < pd.Timestamp(trade_date).normalize()]
+    prior = daily_df[daily_df.index.date < pd.Timestamp(trade_date).date()]
     if prior.empty:
         return None
     row = prior.iloc[-1]
