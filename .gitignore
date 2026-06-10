@@ -9,3 +9,6 @@ tsconfig.tsbuildinfo
 __pycache__/
 *.pyc
 *.pyo
+
+# Claude Code session state
+.claude/worktrees/
