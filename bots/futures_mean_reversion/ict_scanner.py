@@ -27,9 +27,19 @@ from live.telegram_alerts import TelegramAlerter
 
 # SMT divergence pairs: primary → secondary instrument for cross-market confirmation
 SMT_PAIRS: dict[str, str] = {
-    "MNQ": "MES",   # Nasdaq Mini → S&P500 Mini
-    "MES": "MNQ",
+    "MNQ": "MES",   # Nasdaq Mini → S&P500 Mini (cross-validate each other)
+    "MES": "MNQ",   # S&P500 Mini → Nasdaq Mini (cross-validate each other)
     "MGC": "GC=F",  # Micro Gold → full Gold
+}
+
+# Session display labels for Telegram alerts
+SESSION_LABELS: dict[str, str] = {
+    "asia_killzone":   "🌏 Asia Kill Zone",
+    "london_killzone": "🇬🇧 London Kill Zone",
+    "ny_killzone":     "🗽 NY Kill Zone",
+    "silver_bullet_1": "🎯 Silver Bullet (AM)",
+    "silver_bullet_2": "🎯 Silver Bullet (PM)",
+    "ny_pm":           "🌆 NY Afternoon",
 }
 
 logging.basicConfig(
@@ -216,6 +226,106 @@ def scan_ict(symbol: str) -> tuple[ICTSignal, str]:
 
     msg = format_ict_signal(symbol, sig, CONFIG)
     return sig, msg
+
+
+# ─── Per-day dedup state ──────────────────────────────────────────────────────
+# Tracks which (symbol, window_name) pairs have already fired today.
+_ict_sent: dict[tuple, bool] = {}
+_ict_sent_date: date | None = None
+
+
+def _ict_reset_if_new_day():
+    global _ict_sent, _ict_sent_date
+    today = date.today()
+    if _ict_sent_date != today:
+        _ict_sent = {}
+        _ict_sent_date = today
+
+
+def _ict_already_sent(symbol: str, window_name: str) -> bool:
+    _ict_reset_if_new_day()
+    return _ict_sent.get((symbol, window_name), False)
+
+
+def _ict_mark_sent(symbol: str, window_name: str):
+    _ict_reset_if_new_day()
+    _ict_sent[(symbol, window_name)] = True
+
+
+# ─── Multi-session scan ───────────────────────────────────────────────────────
+
+def scan_ict_all_sessions(symbol: str) -> list[tuple]:
+    """
+    Run ICT scan across all session windows for one symbol.
+    Returns list of (ICTSignal, formatted_message) tuples — one per valid A+ signal.
+    Signals already sent today (dedup by window) are excluded.
+    """
+    logger.info(f"Scanning all sessions for {symbol}...")
+
+    intraday = fetch_intraday(symbol)
+    daily    = fetch_daily(symbol)
+
+    if intraday is None or daily is None:
+        sig = ICTSignal(direction="no_setup", reason="Data fetch failed")
+        return [(sig, f"⚠️ *{symbol}* — data fetch failed")]
+
+    # Fetch secondary instrument for SMT divergence
+    secondary = None
+    smt_partner = SMT_PAIRS.get(symbol)
+    if smt_partner:
+        secondary = fetch_intraday(smt_partner)
+        if secondary is None:
+            logger.warning(f"SMT secondary ({smt_partner}) unavailable — scoring without it")
+
+    strategy = ICTNYKillzone(ICTNYKillzoneConfig(min_score=CONFIG.ict_min_score))
+    signals  = strategy.scan_all_windows(intraday, daily, secondary_df=secondary)
+
+    results = []
+    for sig in signals:
+        win = sig.window or "unknown"
+        if _ict_already_sent(symbol, win):
+            logger.info(f"{symbol} [{win}]: already sent today — skipping")
+            continue
+
+        session_label = SESSION_LABELS.get(win, win)
+        base_msg = format_ict_signal(symbol, sig, CONFIG)
+        # Prepend session label line
+        msg = f"*{session_label}*\n\n" + base_msg
+
+        logger.info(
+            f"{symbol} [{win}]: direction={sig.direction}  "
+            f"{'entry=' + str(sig.entry) + '  score=' + str(sig.score.total) + '/10' if sig.is_valid else sig.reason[:60]}"
+        )
+        results.append((sig, msg))
+
+    return results
+
+
+def run_ict_all_sessions(dry_run: bool = False) -> None:
+    """Called by bot_daemon for each session window. Loops symbols, sends alerts, respects dedup."""
+    symbols = CONFIG.scan_symbols
+    alerter = TelegramAlerter(CONFIG.telegram)
+
+    for symbol in symbols:
+        try:
+            alerts = scan_ict_all_sessions(symbol)
+            for sig, msg in alerts:
+                win = sig.window or "unknown"
+                if dry_run:
+                    print(f"\n{'='*55}")
+                    print(msg)
+                    print(f"{'='*55}")
+                    print(f"[DRY RUN — {win.upper()} not sent]")
+                else:
+                    sent = alerter._send(msg)
+                    if sent:
+                        logger.info(f"ICT {symbol} [{win}]: Telegram sent ✅")
+                        _ict_mark_sent(symbol, win)
+                    else:
+                        logger.warning(f"ICT {symbol} [{win}]: Telegram failed")
+                        logger.info("\n" + msg)
+        except Exception as e:
+            logger.error(f"ICT all-sessions scan error for {symbol}: {e}")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

@@ -910,7 +910,7 @@ class Config:
     live: LiveConfig = field(default_factory=LiveConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     active_strategy: str = "ibs"
-    scan_symbols: list = field(default_factory=lambda: ["MNQ", "MGC"])
+    scan_symbols: list = field(default_factory=lambda: ["MNQ", "MES", "MGC"])
     log_level: str = "INFO"
     # Active plan — applied at startup
     plan: PropFirmPlan = field(default_factory=get_plan)

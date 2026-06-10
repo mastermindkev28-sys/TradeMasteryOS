@@ -1,11 +1,23 @@
 """
 TradeMastery Bot Daemon
 ========================
-Runs 24/7 Mon-Fri. Three scan engines run each trading day:
+Runs 24/7 Mon-Fri. Four trading sessions covered each day:
 
-  6:00 AM PT  — IBS mean reversion scan     (overnight signal, next-day open entry)
-  6:25 AM PT  — ICT NY Kill Zone scan        (9:25 AM ET, A+ intraday setups)
-  9:35–10:50 ET — ORB + VWAP MR intraday    (polls every 5 min, one alert per signal/day)
+  Asia Kill Zone   8:05 PM ET  (20:05) — ICT scan
+  London Kill Zone 11:00 PM ET (23:00) — ICT scan  [2:00 AM ET next day]
+  NY AM            9:25 AM ET         — ICT + IBS + ORB+VWAP scans
+  NY PM            1:30 PM ET         — ICT + ORB+VWAP PM scans
+
+Polling sessions (ORB+VWAP every 5 min):
+  9:35–10:50 ET  (NY AM)
+  13:00–15:30 ET (NY PM)
+
+Schedule (PT times for `schedule` library):
+  6:00 AM PT Mon–Fri → IBS mean reversion scan
+  6:25 AM PT Mon–Fri → ICT NY Kill Zone scan
+  17:05 PT Mon–Fri   → Asia Kill Zone ICT scan (8:05 PM ET)
+  23:00 PT Mon–Fri   → London Kill Zone ICT scan (2:00 AM ET)
+  10:30 AM PT Mon–Fri → NY PM ICT scan (1:30 PM ET)
 
 Usage:
     python3 bot_daemon.py              # start daemon (blocks — use launchd to manage)
@@ -36,8 +48,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import CONFIG
 from scanner import scan_symbol, format_telegram_message
-from ict_scanner import scan_ict
-from orb_vwap_scanner import run_orb_vwap_scan, reset_orb_vwap_state
+from ict_scanner import scan_ict, scan_ict_all_sessions, run_ict_all_sessions
+from orb_vwap_scanner import run_orb_vwap_scan, run_orb_vwap_pm_scan, reset_orb_vwap_state
 from live.telegram_alerts import TelegramAlerter
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
@@ -155,40 +167,96 @@ def run_ict_scan():
             logger.error(f"ICT scan error for {symbol}: {e}")
 
 
+def run_ict_asia_scan():
+    """Run ICT Asia Kill Zone scan at 8:05 PM ET (17:05 PT)."""
+    now_pt = datetime.now(PACIFIC)
+    if now_pt.weekday() >= 5:
+        return
+    logger.info(f"=== ICT Asia Kill Zone scan [{now_pt.strftime('%a %b %d %I:%M %p PT')}] ===")
+    try:
+        run_ict_all_sessions()
+    except Exception as e:
+        logger.error(f"ICT Asia scan error: {e}")
+
+
+def run_ict_london_scan():
+    """Run ICT London Kill Zone scan at 2:00 AM ET (23:00 PT previous night)."""
+    now_pt = datetime.now(PACIFIC)
+    if now_pt.weekday() >= 5:
+        return
+    logger.info(f"=== ICT London Kill Zone scan [{now_pt.strftime('%a %b %d %I:%M %p PT')}] ===")
+    try:
+        run_ict_all_sessions()
+    except Exception as e:
+        logger.error(f"ICT London scan error: {e}")
+
+
+def run_ict_ny_pm_scan():
+    """Run ICT NY PM session scan at 1:30 PM ET (10:30 AM PT)."""
+    now_pt = datetime.now(PACIFIC)
+    if now_pt.weekday() >= 5:
+        return
+    logger.info(f"=== ICT NY PM session scan [{now_pt.strftime('%a %b %d %I:%M %p PT')}] ===")
+    try:
+        run_ict_all_sessions()
+    except Exception as e:
+        logger.error(f"ICT NY PM scan error: {e}")
+
+
 def setup_schedule():
     """
-    Three scan engines Mon–Fri:
+    Four session scan engines Mon–Fri:
       6:00 AM PT  — IBS mean reversion (overnight signal, next-day open entry)
       6:25 AM PT  — ICT NY Kill Zone   (= 9:25 AM ET, A+ intraday setups)
-      Main loop   — ORB + VWAP MR polls every 5 min during 9:35–10:50 ET
+      10:30 AM PT — ICT NY PM session  (= 1:30 PM ET)
+      17:05 PT    — ICT Asia Kill Zone (= 8:05 PM ET)
+      23:00 PT    — ICT London Kill Zone (= 2:00 AM ET next day)
+      Main loop   — ORB + VWAP MR polls every 5 min during 9:35–10:50 ET (AM)
+                    and 13:00–15:30 ET (PM)
     """
     for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
         getattr(schedule.every(), day).at("06:00").do(run_scan)
         getattr(schedule.every(), day).at("06:25").do(run_ict_scan)
+        getattr(schedule.every(), day).at("10:30").do(run_ict_ny_pm_scan)
+        getattr(schedule.every(), day).at("17:05").do(run_ict_asia_scan)
+        getattr(schedule.every(), day).at("23:00").do(run_ict_london_scan)
 
     schedule.every().sunday.at("20:00").do(send_heartbeat)
 
     logger.info(
         "Schedule set:\n"
-        "  6:00 AM PT Mon–Fri → IBS mean reversion scan\n"
-        "  6:25 AM PT Mon–Fri → ICT NY Kill Zone scan\n"
-        "  9:35–10:50 ET daily → ORB + VWAP MR polls (5-min loop)\n"
-        "  8:00 PM PT Sunday  → weekly heartbeat"
+        "  6:00 AM PT Mon–Fri  → IBS mean reversion scan\n"
+        "  6:25 AM PT Mon–Fri  → ICT NY Kill Zone scan\n"
+        "  9:35–10:50 ET daily → ORB + VWAP MR AM polls (5-min loop)\n"
+        "  10:30 AM PT Mon–Fri → ICT NY PM session scan (1:30 PM ET)\n"
+        "  13:00–15:30 ET daily→ ORB + VWAP MR PM polls (5-min loop)\n"
+        "  17:05 PT Mon–Fri    → ICT Asia Kill Zone scan (8:05 PM ET)\n"
+        "  23:00 PT Mon–Fri    → ICT London Kill Zone scan (2:00 AM ET)\n"
+        "  8:00 PM PT Sunday   → weekly heartbeat"
     )
 
 
 # ── Intraday polling — ORB + VWAP MR ─────────────────────────────────────────
 
-_last_orb_poll_minute: int = -1   # track last minute we ran the intraday scan
+# Session windows in ET: (name, start_hour, start_min, end_hour, end_min)
+_INTRADAY_SESSIONS_ET = [
+    ("asia",   20,  5, 23, 55),
+    ("london",  2,  5,  4, 55),
+    ("ny_am",   9, 35, 10, 50),
+    ("ny_pm",  13, 35, 15, 25),
+]
+
+_last_poll_key: str = ""   # track last (session, minute) we ran the intraday scan
 
 
 def maybe_run_intraday_scan():
     """
     Called from the main loop every 30 s.
-    Fires the ORB + VWAP MR scanner at :00 and :30 of each 5-minute block
-    between 9:35 and 10:50 ET, Mon–Fri.
+    Fires ORB + VWAP MR scanner every 5 minutes within each session window.
+    AM session (9:35–10:50 ET) uses run_orb_vwap_scan().
+    PM session (13:35–15:25 ET) uses run_orb_vwap_pm_scan().
     """
-    global _last_orb_poll_minute
+    global _last_poll_key
 
     now_et = datetime.now(EASTERN)
 
@@ -201,26 +269,31 @@ def maybe_run_intraday_scan():
         reset_orb_vwap_state()
         return
 
-    # Session window: 9:35–10:50 ET
-    session_open  = now_et.replace(hour=9,  minute=35, second=0, microsecond=0)
-    session_close = now_et.replace(hour=10, minute=50, second=0, microsecond=0)
-    if not (session_open <= now_et <= session_close):
-        return
+    # Check all session windows
+    for sess_name, sh, sm, eh, em in _INTRADAY_SESSIONS_ET:
+        sess_open  = now_et.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        sess_close = now_et.replace(hour=eh, minute=em, second=0, microsecond=0)
+        if not (sess_open <= now_et <= sess_close):
+            continue
 
-    # Fire on every 5th minute (9:35, 9:40, 9:45 … 10:50)
-    if now_et.minute % 5 != 0:
-        return
+        # Fire on every 5th minute within the window
+        if now_et.minute % 5 != 0:
+            continue
 
-    # Deduplicate within the same minute
-    if now_et.minute == _last_orb_poll_minute:
-        return
-    _last_orb_poll_minute = now_et.minute
+        poll_key = f"{sess_name}:{now_et.minute}"
+        if poll_key == _last_poll_key:
+            continue
+        _last_poll_key = poll_key
 
-    logger.info(f"=== ORB+VWAP MR poll [{now_et.strftime('%I:%M %p ET')}] ===")
-    try:
-        run_orb_vwap_scan()
-    except Exception as e:
-        logger.error(f"ORB+VWAP scan error: {e}")
+        logger.info(f"=== ORB+VWAP MR poll [{sess_name}] [{now_et.strftime('%I:%M %p ET')}] ===")
+        try:
+            if sess_name == "ny_pm":
+                run_orb_vwap_pm_scan()
+            else:
+                run_orb_vwap_scan()
+        except Exception as e:
+            logger.error(f"ORB+VWAP scan error [{sess_name}]: {e}")
+        break  # only fire one session per iteration
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -238,9 +311,10 @@ def main():
     logger.info("  TradeMastery Bot Daemon starting")
     logger.info(f"  Plan    : {CONFIG.plan.display_name}")
     logger.info(f"  Symbols : {', '.join(CONFIG.scan_symbols)}")
-    logger.info(f"  Engines : IBS @ 6:00 PT | ICT @ 6:25 PT | ORB+VWAP 9:35-10:50 ET")
+    logger.info(f"  Sessions: Asia KZ (20:05 ET) | London KZ (02:05 ET) | NY AM (09:25 ET) | NY PM (13:30 ET)")
+    logger.info(f"  ORB+VWAP: AM polls 9:35-10:50 ET | PM polls 13:35-15:25 ET")
     if CONFIG.sprint_mode:
-        logger.info(f"  ⚡ SPRINT MODE  ICT min score: {CONFIG.ict_min_score}/10  Daily cap: ${CONFIG.sprint_daily_loss_cap:,.0f}")
+        logger.info(f"  SPRINT MODE  ICT min score: {CONFIG.ict_min_score}/10  Daily cap: ${CONFIG.sprint_daily_loss_cap:,.0f}")
     logger.info("=" * 55)
 
     setup_schedule()

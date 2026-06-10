@@ -2,9 +2,12 @@
 ICT New York Kill Zone Strategy — A+ Filter Edition
 =====================================================
 Timeframe : 5-minute bars
-Sessions  : NY Kill Zone  9:30–11:00 AM ET  (primary)
-            Silver Bullet 10:00–11:00 AM ET  (backup window 1)
-            Silver Bullet  2:00– 3:00 PM ET  (backup window 2)
+Sessions  : Asia Kill Zone   8:00 PM–midnight ET  (new)
+            London Kill Zone 2:00–5:00 AM ET       (new)
+            NY Kill Zone     9:30–11:00 AM ET       (primary)
+            Silver Bullet    10:00–11:00 AM ET      (backup window 1)
+            Silver Bullet    2:00– 3:00 PM ET       (backup window 2)
+            NY Afternoon     1:30–4:00 PM ET        (new)
 
 A+ Setup Requirements (8/10 minimum score)
 -------------------------------------------
@@ -40,12 +43,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ICTNYKillzoneConfig:
+    # NY Kill Zone (primary)
     killzone_start: str        = "09:30"
     killzone_end: str          = "11:00"
+    # Silver Bullet sessions
     silver_bullet_1_start: str = "10:00"
     silver_bullet_1_end: str   = "11:00"
     silver_bullet_2_start: str = "14:00"
     silver_bullet_2_end: str   = "15:00"
+    # London Kill Zone (new)
+    london_kz_start: str       = "02:00"
+    london_kz_end: str         = "05:00"
+    # NY Afternoon / PM session (new)
+    ny_pm_start: str           = "13:30"
+    ny_pm_end: str             = "16:00"
+    # Asia Kill Zone (new)
+    asia_kz_start: str         = "20:00"
+    asia_kz_end: str           = "23:59"
+    # Risk params (keep existing)
     judas_window_bars: int     = 8
     min_raid_pts: float        = 2.0
     min_fvg_pts: float         = 2.0
@@ -56,7 +71,7 @@ class ICTNYKillzoneConfig:
     target2_rr: float          = 4.0
     min_score: int             = 8
     require_displacement_mss: bool = True
-    max_signals_per_day: int   = 1
+    max_signals_per_day: int   = 5
 
 
 @dataclass
@@ -93,6 +108,53 @@ class ICTNYKillzone:
     def __init__(self, cfg: ICTNYKillzoneConfig | None = None):
         self.cfg = cfg or ICTNYKillzoneConfig()
 
+    def _all_windows(self) -> list:
+        """All session windows ordered by time of day."""
+        return [
+            ("asia_killzone",   self.cfg.asia_kz_start,         self.cfg.asia_kz_end,         True),
+            ("london_killzone", self.cfg.london_kz_start,       self.cfg.london_kz_end,       True),
+            ("ny_killzone",     self.cfg.killzone_start,         self.cfg.killzone_end,        True),
+            ("silver_bullet_1", self.cfg.silver_bullet_1_start, self.cfg.silver_bullet_1_end, False),
+            ("silver_bullet_2", self.cfg.silver_bullet_2_start, self.cfg.silver_bullet_2_end, False),
+            ("ny_pm",           self.cfg.ny_pm_start,           self.cfg.ny_pm_end,           False),
+        ]
+
+    def scan_all_windows(
+        self,
+        intraday_df: pd.DataFrame,
+        daily_df: pd.DataFrame,
+        secondary_df: Optional[pd.DataFrame] = None,
+        trade_date=None,
+    ) -> list:
+        """Scan all session windows. Returns list of all valid A+ ICTSignals found."""
+        if trade_date is None:
+            trade_date = intraday_df.index[-1].date()
+
+        pdl = get_prev_day_levels(daily_df, trade_date)
+        if pdl is None:
+            return []
+
+        today = intraday_df[intraday_df.index.date == trade_date].copy()
+        if today.empty:
+            return []
+
+        signals = []
+        for win_name, start, end, use_judas in self._all_windows():
+            try:
+                wbars = today.between_time(start, end)
+            except Exception:
+                continue
+            if len(wbars) < 4:
+                continue
+            sig = self._scan_window(wbars, pdl, today, secondary_df, win_name, use_judas)
+            if sig.is_valid and sig.score and sig.score.is_aplus:
+                sig.window = win_name
+                signals.append(sig)
+            if len(signals) >= self.cfg.max_signals_per_day:
+                break
+
+        return signals
+
     def get_signal(
         self,
         intraday_df: pd.DataFrame,
@@ -111,11 +173,7 @@ class ICTNYKillzone:
         if today.empty:
             return ICTSignal(direction="no_setup", reason="No intraday data for today")
 
-        windows = [
-            ("ny_killzone",     self.cfg.killzone_start,        self.cfg.killzone_end,        True),
-            ("silver_bullet_1", self.cfg.silver_bullet_1_start, self.cfg.silver_bullet_1_end, False),
-            ("silver_bullet_2", self.cfg.silver_bullet_2_start, self.cfg.silver_bullet_2_end, False),
-        ]
+        windows = self._all_windows()
 
         best: Optional[ICTSignal] = None
 

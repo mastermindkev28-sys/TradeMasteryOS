@@ -1,8 +1,8 @@
 """
 ORB + VWAP Mean Reversion Scanner
 ====================================
-Polls every 5 minutes during the NY session (9:35–10:50 ET).
-Sends one Telegram alert per signal type per day — no duplicate blasts.
+Polls every 5 minutes during NY AM (9:35–10:50 ET) and NY PM (13:00–15:30 ET).
+Sends one Telegram alert per signal type per session per day — no duplicate blasts.
 
 Usage:
     python3 orb_vwap_scanner.py                  # scan all symbols now
@@ -34,8 +34,16 @@ logger = logging.getLogger("orb_vwap_scanner")
 
 # ── Per-day dedup state ───────────────────────────────────────────────────────
 # Tracks which signals have already been sent today (resets each calendar day).
-_sent: dict[str, dict[str, bool]] = {}   # {symbol: {"orb": bool, "vwap_mr": bool}}
+# Key: (symbol, signal_type, session) where session is "am" or "pm".
+_sent: dict[tuple, bool] = {}
 _sent_date: date | None = None
+
+# Afternoon OR config — opening range from 12:00–13:00 ET, trade until 15:30
+AFTERNOON_CONFIG = ORBVWAPConfig(
+    or_start="12:00",
+    or_end="13:00",
+    trade_end="15:30",
+)
 
 
 def _reset_if_new_day():
@@ -46,14 +54,14 @@ def _reset_if_new_day():
         _sent_date = today
 
 
-def _already_sent(symbol: str, signal_type: str) -> bool:
+def _already_sent(symbol: str, signal_type: str, session: str = "am") -> bool:
     _reset_if_new_day()
-    return _sent.get(symbol, {}).get(signal_type, False)
+    return _sent.get((symbol, signal_type, session), False)
 
 
-def _mark_sent(symbol: str, signal_type: str):
+def _mark_sent(symbol: str, signal_type: str, session: str = "am"):
     _reset_if_new_day()
-    _sent.setdefault(symbol, {})[signal_type] = True
+    _sent[(symbol, signal_type, session)] = True
 
 
 # ── Data Fetch ────────────────────────────────────────────────────────────────
@@ -195,9 +203,9 @@ def scan_orb_vwap(
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
     """
-    Check for ORB and VWAP MR signals on `symbol`.
+    Check for ORB and VWAP MR signals on `symbol` (AM session).
     Returns list of (signal_type, formatted_message) for new signals only.
-    Signals already sent today are skipped.
+    Signals already sent today are skipped. Session key: "am".
     """
     df = fetch_intraday(symbol)
     if df is None or df.empty:
@@ -209,7 +217,7 @@ def scan_orb_vwap(
     results    = []
 
     # ── ORB ──
-    if not _already_sent(symbol, "orb"):
+    if not _already_sent(symbol, "orb", "am"):
         or_range = strategy.get_opening_range(df, trade_date)
         if or_range:
             or_high, or_low = or_range
@@ -218,26 +226,99 @@ def scan_orb_vwap(
                 msg = format_orb_signal(symbol, sig, CONFIG)
                 results.append(("orb", msg))
                 if not dry_run:
-                    _mark_sent(symbol, "orb")
-                logger.info(f"{symbol} ORB: {sig.direction} entry={sig.entry} stop={sig.stop}")
+                    _mark_sent(symbol, "orb", "am")
+                logger.info(f"{symbol} ORB [AM]: {sig.direction} entry={sig.entry} stop={sig.stop}")
             else:
-                logger.info(f"{symbol} ORB: {sig.reason}")
+                logger.info(f"{symbol} ORB [AM]: {sig.reason}")
         else:
             logger.info(f"{symbol}: OR not yet available or too narrow")
 
     # ── VWAP MR ──
-    if not _already_sent(symbol, "vwap_mr"):
+    if not _already_sent(symbol, "vwap_mr", "am"):
         sig = strategy.get_vwap_mr_signal(df, trade_date)
         if sig.is_valid:
             msg = format_vwap_mr_signal(symbol, sig, CONFIG)
             results.append(("vwap_mr", msg))
             if not dry_run:
-                _mark_sent(symbol, "vwap_mr")
-            logger.info(f"{symbol} VWAP MR: {sig.direction} dev={sig.deviation_pts:.1f}pts ADX={sig.adx:.1f}")
+                _mark_sent(symbol, "vwap_mr", "am")
+            logger.info(f"{symbol} VWAP MR [AM]: {sig.direction} dev={sig.deviation_pts:.1f}pts ADX={sig.adx:.1f}")
         else:
-            logger.info(f"{symbol} VWAP MR: {sig.reason}")
+            logger.info(f"{symbol} VWAP MR [AM]: {sig.reason}")
 
     return results
+
+
+def scan_orb_vwap_pm(
+    symbol: str,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
+    """
+    Check for ORB and VWAP MR signals on `symbol` (NY PM session, 1:00–3:30 PM ET).
+    Opening range defined as 12:00–13:00 ET; trades run until 15:30 ET.
+    Returns list of (signal_type, formatted_message) for new signals only.
+    Session key: "pm".
+    """
+    df = fetch_intraday(symbol)
+    if df is None or df.empty:
+        logger.warning(f"{symbol}: data fetch failed (PM scan)")
+        return []
+
+    trade_date = df.index[-1].date()
+    strategy   = ORBVWAPStrategy(AFTERNOON_CONFIG)
+    results    = []
+
+    # ── ORB (PM) ──
+    if not _already_sent(symbol, "orb", "pm"):
+        or_range = strategy.get_opening_range(df, trade_date)
+        if or_range:
+            or_high, or_low = or_range
+            sig = strategy.get_orb_signal(df, or_high, or_low, trade_date)
+            if sig.is_valid:
+                msg = format_orb_signal(symbol, sig, CONFIG)
+                results.append(("orb_pm", msg))
+                if not dry_run:
+                    _mark_sent(symbol, "orb", "pm")
+                logger.info(f"{symbol} ORB [PM]: {sig.direction} entry={sig.entry} stop={sig.stop}")
+            else:
+                logger.info(f"{symbol} ORB [PM]: {sig.reason}")
+        else:
+            logger.info(f"{symbol}: PM OR not yet available or too narrow")
+
+    # ── VWAP MR (PM) ──
+    if not _already_sent(symbol, "vwap_mr", "pm"):
+        sig = strategy.get_vwap_mr_signal(df, trade_date)
+        if sig.is_valid:
+            msg = format_vwap_mr_signal(symbol, sig, CONFIG)
+            results.append(("vwap_mr_pm", msg))
+            if not dry_run:
+                _mark_sent(symbol, "vwap_mr", "pm")
+            logger.info(f"{symbol} VWAP MR [PM]: {sig.direction} dev={sig.deviation_pts:.1f}pts ADX={sig.adx:.1f}")
+        else:
+            logger.info(f"{symbol} VWAP MR [PM]: {sig.reason}")
+
+    return results
+
+
+def run_orb_vwap_pm_scan(dry_run: bool = False) -> None:
+    """Called by bot_daemon every 5 min during NY PM session (13:00–15:30 ET). Sends new alerts."""
+    symbols = CONFIG.scan_symbols
+    alerter = TelegramAlerter(CONFIG.telegram)
+
+    for symbol in symbols:
+        alerts = scan_orb_vwap_pm(symbol, dry_run=dry_run)
+        for signal_type, msg in alerts:
+            if dry_run:
+                print(f"\n{'='*55}")
+                print(msg)
+                print(f"{'='*55}")
+                print(f"[DRY RUN — {signal_type.upper()} not sent]")
+            else:
+                sent = alerter._send(msg)
+                if sent:
+                    logger.info(f"{symbol} {signal_type.upper()}: Telegram sent ✅")
+                else:
+                    logger.warning(f"{symbol} {signal_type.upper()}: Telegram failed")
+                    logger.info("\n" + msg)
 
 
 def run_orb_vwap_scan(dry_run: bool = False) -> None:
