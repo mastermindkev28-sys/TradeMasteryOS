@@ -5,7 +5,8 @@ scipy>=1.11
 matplotlib>=3.8
 
 # Market data — TradingView feed (CME futures, real-time)
-tvdatafeed>=2.0.0
+# Install via: pip install git+https://github.com/StreamAlpha/tvdatafeed.git
+tvDatafeed
 
 # Live broker integrations
 requests>=2.31         # Tradovate REST API
