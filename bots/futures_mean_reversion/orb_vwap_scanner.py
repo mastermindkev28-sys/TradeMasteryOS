@@ -21,9 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP
+from config import CONFIG, CONTRACT_SPECS
 from strategy.orb_vwap_mr import ORBVWAPStrategy, ORBVWAPConfig, ORBSignal, VWAPMRSignal
 from live.telegram_alerts import TelegramAlerter
+from live.tv_feed import fetch_intraday as tv_fetch_intraday
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,25 +67,9 @@ def _mark_sent(symbol: str, signal_type: str, session: str = "am"):
 
 # ── Data Fetch ────────────────────────────────────────────────────────────────
 
-def fetch_intraday(symbol: str, period: str = "2d") -> object:
-    try:
-        import yfinance as yf
-        ticker = YFINANCE_MAP.get(symbol, symbol)
-        df = yf.download(ticker, period=period, interval="5m",
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return None
-        if hasattr(df.columns, "levels"):
-            df.columns = df.columns.get_level_values(0)
-        df.columns = [c.lower() for c in df.columns]
-        df = df[["open", "high", "low", "close", "volume"]].dropna()
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("America/New_York")
-        return df
-    except Exception as e:
-        logger.error(f"Intraday fetch failed for {symbol}: {e}")
-        return None
+def fetch_intraday(symbol: str, **_) -> object:
+    """Fetch 5-min intraday bars from TradingView."""
+    return tv_fetch_intraday(symbol, interval_minutes=5, n_bars=500)
 
 
 # ── Telegram Formatters ───────────────────────────────────────────────────────

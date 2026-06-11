@@ -4,8 +4,8 @@ pandas>=2.1
 scipy>=1.11
 matplotlib>=3.8
 
-# Market data (free tier, daily bars)
-yfinance>=0.2.36
+# Market data — TradingView feed (CME futures, real-time)
+tvdatafeed>=2.0.0
 
 # Live broker integrations
 requests>=2.31         # Tradovate REST API

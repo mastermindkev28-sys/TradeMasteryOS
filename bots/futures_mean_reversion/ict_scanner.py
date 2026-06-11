@@ -21,15 +21,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP
+from config import CONFIG, CONTRACT_SPECS
 from strategy.ict_ny_killzone import ICTNYKillzone, ICTNYKillzoneConfig, ICTSignal
 from live.telegram_alerts import TelegramAlerter
+from live.tv_feed import fetch_intraday as tv_fetch_intraday, fetch_daily as tv_fetch_daily
 
 # SMT divergence pairs: primary → secondary instrument for cross-market confirmation
 SMT_PAIRS: dict[str, str] = {
     "MNQ": "MES",   # Nasdaq Mini → S&P500 Mini (cross-validate each other)
     "MES": "MNQ",   # S&P500 Mini → Nasdaq Mini (cross-validate each other)
-    "MGC": "GC=F",  # Micro Gold → full Gold
+    "MGC": "GC",    # Micro Gold → full Gold
 }
 
 # Session display labels for Telegram alerts
@@ -52,49 +53,14 @@ logger = logging.getLogger("ict_scanner")
 
 # ─── Data Fetcher ─────────────────────────────────────────────────────────────
 
-def fetch_intraday(symbol: str, interval: str = "5m", period: str = "5d"):
-    """Fetch intraday bars via yfinance."""
-    try:
-        import yfinance as yf
-        ticker = YFINANCE_MAP.get(symbol, symbol)
-        df = yf.download(ticker, period=period, interval=interval,
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return None
-        if hasattr(df.columns, "levels"):
-            df.columns = df.columns.get_level_values(0)
-        df.columns = [c.lower() for c in df.columns]
-        df = df[["open", "high", "low", "close", "volume"]].dropna()
-        # Convert index to ET
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("America/New_York")
-        return df
-    except Exception as e:
-        logger.error(f"Intraday fetch failed for {symbol}: {e}")
-        return None
+def fetch_intraday(symbol: str, **_):
+    """Fetch 5-min intraday bars from TradingView."""
+    return tv_fetch_intraday(symbol, interval_minutes=5, n_bars=500)
 
 
-def fetch_daily(symbol: str, period: str = "60d"):
-    """Fetch daily bars for prev-day levels."""
-    try:
-        import yfinance as yf
-        ticker = YFINANCE_MAP.get(symbol, symbol)
-        df = yf.download(ticker, period=period, interval="1d",
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return None
-        if hasattr(df.columns, "levels"):
-            df.columns = df.columns.get_level_values(0)
-        df.columns = [c.lower() for c in df.columns]
-        df = df[["open", "high", "low", "close", "volume"]].dropna()
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("America/New_York")
-        return df
-    except Exception as e:
-        logger.error(f"Daily fetch failed for {symbol}: {e}")
-        return None
+def fetch_daily(symbol: str, **_):
+    """Fetch daily bars from TradingView for prev-day levels."""
+    return tv_fetch_daily(symbol, n_bars=120)
 
 
 # ─── Telegram Formatter ───────────────────────────────────────────────────────

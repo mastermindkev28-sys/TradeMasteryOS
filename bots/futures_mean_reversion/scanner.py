@@ -29,9 +29,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CONFIG, CONTRACT_SPECS, YFINANCE_MAP, PROP_FIRM_PLANS
+from config import CONFIG, CONTRACT_SPECS, PROP_FIRM_PLANS
 from strategy.ibs_mean_reversion import IBSMeanReversion
 from live.telegram_alerts import TelegramAlerter
+from live.tv_feed import fetch_daily as tv_fetch_daily
 from utils.position_sizing import fixed_fractional_contracts
 
 logging.basicConfig(
@@ -43,21 +44,11 @@ logger = logging.getLogger("scanner")
 
 
 def fetch_bars(symbol: str, n: int = 350):
-    """Pull daily bars from yfinance. Returns DataFrame or None."""
-    try:
-        import yfinance as yf
-        ticker = YFINANCE_MAP.get(symbol, symbol)
-        df = yf.download(ticker, period="5y", interval="1d",
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return None
-        if hasattr(df.columns, "levels"):
-            df.columns = df.columns.get_level_values(0)
-        df.columns = [c.lower() for c in df.columns]
-        return df[["open", "high", "low", "close", "volume"]].dropna().tail(n)
-    except Exception as e:
-        logger.error(f"Data fetch failed for {symbol}: {e}")
-        return None
+    """Pull daily bars from TradingView. Returns DataFrame or None."""
+    df = tv_fetch_daily(symbol, n_bars=n)
+    if df is None:
+        logger.error(f"Data fetch failed for {symbol}")
+    return df
 
 
 def scan_symbol(symbol: str, cfg=CONFIG) -> dict:
