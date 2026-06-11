@@ -4,9 +4,8 @@ pandas>=2.1
 scipy>=1.11
 matplotlib>=3.8
 
-# Market data — TradingView feed (CME futures, real-time)
-# Install via: pip install git+https://github.com/StreamAlpha/tvdatafeed.git
-tvDatafeed
+# Market data — Yahoo Finance (futures tickers are real-time on Yahoo)
+yfinance>=0.2.36
 
 # Live broker integrations
 requests>=2.31         # Tradovate REST API
